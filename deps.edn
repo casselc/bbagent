@@ -1,0 +1,9 @@
+{:paths ["src" "resources" "../bb4t/src" "../bb4t/resources"]
+ :deps {org.clojure/clojure {:mvn/version "1.12.5"}
+        org.babashka/sci {:git/url "https://github.com/borkdude/sci"
+                          :git/sha "64163c4560e085ffdcf47951b406f62f753b7f4c"}
+        cheshire/cheshire {:mvn/version "6.2.0"}
+        org.babashka/http-client {:mvn/version "0.4.24"}}
+ :aliases
+ {:test {:extra-paths ["test"]
+         :main-opts ["-m" "bbagent.test-runner"]}}}
