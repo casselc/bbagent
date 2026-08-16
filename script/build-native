@@ -5,7 +5,7 @@ set -euo pipefail
 BB4T_REPOSITORY=${BB4T_REPOSITORY:-https://github.com/casselc/babashka.git}
 BBAGENT_REPOSITORY=${BBAGENT_REPOSITORY:-https://github.com/casselc/bbagent.git}
 BB4T_COMMIT=${BB4T_COMMIT:-896af34a7933a80f9fec16995d7a477354b49649}
-: "${BBAGENT_COMMIT:?Set BBAGENT_COMMIT to an exact published bbagent commit}"
+BBAGENT_COMMIT=${BBAGENT_COMMIT:-39703745fd48fd462b01bce088336779687a09a0}
 
 if [[ ! "$BB4T_COMMIT" =~ ^[0-9a-f]{40}$ ]] || \
    [[ ! "$BBAGENT_COMMIT" =~ ^[0-9a-f]{40}$ ]]

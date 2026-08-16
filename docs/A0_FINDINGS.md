@@ -34,14 +34,14 @@ Current coordinates:
 accepted BB1 tag/dev tip: 8cbee8e1f7106bb7b2d77050c7dc50abb805ce43
 measured BB1 implementation: cedbcb9adcde61533cd023b71c14dc4b7c109cc3
 bb4t A0 build hook: 896af34a7933a80f9fec16995d7a477354b49649
-bbagent: new repository, uncommitted
+bbagent A0 implementation: 39703745fd48fd462b01bce088336779687a09a0
 development embedded bb4t value: development
 development embedded bbagent value: development
 ```
 
-The native wrapper pins the exact published bb4t hook commit and refuses to build
-until an exact published bbagent commit is supplied. It does not falsely pin the
-accepted BB1 tip, which does not contain the application hook.
+The native wrapper pins the exact bb4t hook and bbagent implementation commits. It
+does not falsely pin the accepted BB1 tip, which does not contain the application
+hook.
 
 ## 3. Agent Loop
 
@@ -213,9 +213,8 @@ does not change a digest and meaningful profile/grant changes do.
 ## 9. Native Status
 
 Not proven. The source integration hook and strict pinned build wrapper exist, but
-this environment has neither `lein` nor `GRAALVM_HOME/bin/native-image`. The bb4t
-hook is published and pinned, but bbagent does not yet have a published source
-coordinate, which the wrapper correctly requires.
+this environment has neither `lein` nor `GRAALVM_HOME/bin/native-image`. Exact bb4t
+and bbagent source coordinates are pinned, but no native build result is claimed.
 
 No native artifact, size delta, startup measurement, or JVM/native parity claim is
 made for A0.
@@ -264,9 +263,9 @@ Deterministic JVM result:
 
 ## 12. Recommendation for A1
 
-Do not begin A1 yet. First publish exact bb4t and bbagent commits, run the pinned
-native build, execute the deterministic suite against the native application where
-applicable, and perform one bounded live-provider project-reading/resume session.
+Do not begin A1 yet. First run the pinned native build, execute the deterministic
+suite against the native application where applicable, and perform one bounded
+live-provider project-reading/resume session.
 
 If those checks do not reveal an authority or recovery defect, the application seams
 are sufficiently clean for A1: CLI code is thin, the future TUI can remain a client of
