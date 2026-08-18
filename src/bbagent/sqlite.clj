@@ -78,19 +78,27 @@
             (.close first-connection)))
         warm-open (open-connection datasource)
         ^Connection warm-connection (:connection warm-open)
-        committed-rows
+        second-evidence
         (try
-          (let [persisted (rows warm-connection)]
+          (let [persisted (rows warm-connection)
+                rollback-visible
+                (jdbc/with-transaction [transaction warm-connection
+                                        {:rollback-only true}]
+                  (jdbc/execute-one!
+                   transaction
+                   ["insert into s0a_smoke (id, value) values (?, ?)"
+                    2 "rolled-back"])
+                  (rows transaction))]
             (ensure! (= [{:id 1 :value "committed"}] persisted)
                      "Committed SQLite row was not recovered"
                      {:rows persisted})
-            (jdbc/with-transaction [transaction warm-connection
-                                    {:rollback-only true}]
-              (jdbc/execute-one!
-               transaction
-               ["insert into s0a_smoke (id, value) values (?, ?)"
-                2 "rolled-back"]))
-            persisted)
+            (ensure! (= [{:id 1 :value "committed"}
+                         {:id 2 :value "rolled-back"}]
+                        rollback-visible)
+                     "Rollback mutation was not visible inside its transaction"
+                     {:rows rollback-visible})
+            {:committed-rows persisted
+             :rollback-visible-rows rollback-visible})
           (finally
             (.close warm-connection)))
         verification-open (open-connection datasource)
@@ -100,12 +108,11 @@
           (rows verification-connection)
           (finally
             (.close verification-connection)))]
-    (ensure! (= committed-rows final-rows)
+    (ensure! (= (:committed-rows second-evidence) final-rows)
              "Rolled-back SQLite row persisted"
-             {:committed committed-rows :final final-rows})
+             {:committed (:committed-rows second-evidence) :final final-rows})
     {:database/path (str path)
      :database/bytes (Files/size path)
-     :next.jdbc/version "1.3.1118"
      :sqlite-jdbc/version (SQLiteJDBCLoader/getVersion)
      :jdbc-driver/version (:jdbc-driver/version first-evidence)
      :sqlite/version (:sqlite/version first-evidence)
@@ -114,6 +121,8 @@
                        :warm (:latency-ns warm-open)
                        :verification (:latency-ns verification-open)}
      :committed/rows final-rows
+     :rollback/visible-before-rollback?
+     (= 2 (count (:rollback-visible-rows second-evidence)))
      :rollback/persisted? false}))
 
 (defn- forbidden-database-path [database]
@@ -154,12 +163,10 @@
                                           "(data.json/read \"{\\\"ok\\\":true}\")")
          :json-write (app-runtime/evaluate app "(data.json/write {\"ok\" true})")
          :project-read (app-runtime/evaluate app "(project/read \"README.md\")")}
-        negatives
-        (into (sorted-map)
-              (map (fn [[probe source]]
-                     [probe (select-keys (app-runtime/evaluate app source)
-                                         [:status :error])]))
-              (negative-sources forbidden))
+        negatives (into (sorted-map)
+                        (map (fn [[probe source]]
+                               [probe (app-runtime/evaluate app source)]))
+                        (negative-sources forbidden))
         surface (:context/surface description)]
     (ensure! (= app-runtime/context-spec (:context/spec description))
              "SQLite changed the bounded ContextSpec"
@@ -180,6 +187,11 @@
     (ensure! (= #{:error} (set (map :status (vals negatives))))
              "SQLite or JDBC became available to bounded SCI"
              {:negative-probes negatives})
+    (ensure! (= #{:bb4t-evaluation-failure}
+                (set (map #(get-in % [:error :bbagent/error])
+                          (vals negatives))))
+             "A SQLite authority probe failed for an unexpected reason"
+             {:negative-probes negatives})
     (ensure! (not (Files/exists forbidden (make-array LinkOption 0)))
              "A bounded SCI authority probe created a database"
              {:database (str forbidden)})
@@ -192,7 +204,9 @@
            positives)
      :negative-probes
      (into (sorted-map)
-           (map (fn [[probe result]] [probe (:status result)]))
+           (map (fn [[probe result]]
+                  [probe {:status (:status result)
+                          :error/category (get-in result [:error :bbagent/error])}]))
            negatives)
      :forbidden-database/created? false}))
 

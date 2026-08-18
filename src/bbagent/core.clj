@@ -141,6 +141,6 @@
                    (throw (ex-info "inspect requires a session ID" {})))
       "s0a-sqlite-smoke" (sqlite-smoke-command options)
       "describe" (prn {:application :bbagent
-                         :scope :s0a/sqlite-native-spike
+                         :scope :a0
                          :surface :persistent-sci})
       (print (usage)))))

@@ -57,5 +57,8 @@
     (is (= 0 (:projected-class-count surface)))
     (is (= 0 (:supplied-import-count surface)))
     (is (= #{:ok} (set (vals (:positive-probes result)))))
-    (is (= #{:error} (set (vals (:negative-probes result)))))
+    (is (= #{:error}
+           (set (map :status (vals (:negative-probes result))))))
+    (is (= #{:bb4t-evaluation-failure}
+           (set (map :error/category (vals (:negative-probes result))))))
     (is (false? (:forbidden-database/created? result)))))

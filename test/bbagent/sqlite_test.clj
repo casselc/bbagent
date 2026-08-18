@@ -12,12 +12,12 @@
 (deftest file-backed-commit-reopen-and-rollback-test
   (let [^Path database (temporary-database)
         result (sqlite/database-smoke! database)]
-    (is (= "1.3.1118" (:next.jdbc/version result)))
     (is (= "3.53.2.1" (:sqlite-jdbc/version result)))
     (is (= "3.53.2" (:sqlite/version result)))
     (is (= "3.53.2.1" (:jdbc-driver/version result)))
     (is (seq (:sqlite/compile-options result)))
     (is (= [{:id 1 :value "committed"}] (:committed/rows result)))
+    (is (true? (:rollback/visible-before-rollback? result)))
     (is (false? (:rollback/persisted? result)))
     (is (every? pos? (vals (:open-latency-ns result))))
     (is (pos? (:database/bytes result)))
