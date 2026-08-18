@@ -1,0 +1,68 @@
+{:s0a/evidence-version 1
+ :recorded-at "2026-08-18"
+ :build-root "/tmp/bbagent-s0a-20260818d"
+ :coordinates
+ {:builder/commit "f979f96449ccb648a737832125a93b5616399014"
+  :bb4t/commit "f438307280b7a01fd20e99f54cd82682ef15d12a"
+  :bbagent/commit "45a63073ad02646bb99b2eb9d182060c7473b432"
+  :next.jdbc "com.github.seancorfield/next.jdbc:1.3.1118"
+  :sqlite-jdbc "org.xerial/sqlite-jdbc:3.53.2.1"}
+ :toolchain
+ {:os "Ubuntu"
+  :kernel "Linux 7.0.0-29-generic"
+  :architecture "x86_64"
+  :glibc "2.43"
+  :leiningen "2.11.2"
+  :java "25.0.4+7-LTS"
+  :graalvm "Oracle GraalVM 25.2.4+7.1"
+  :native-image "25.0.4"
+  :c-compiler "GCC 15.2.0"
+  :machine-target :compatibility}
+ :tests
+ {:bbagent {:command "clojure -M:test"
+            :tests 28 :assertions 93 :failures 0 :errors 0
+            :log/sha256 "5495ef0102079a5085f7ac7ed4512948c29e9e22d27d76ad8a00339294d129bd"}
+  :bb4t-focused
+  {:command "lein test bb4t.canonical-test bb4t.kernel-test bb4t.bb1-corpus-test"
+   :tests 18 :assertions 164 :failures 0 :errors 0
+   :log/sha256 "d541dcc55b9643efe5bc49c679c545b5939c83afdde02090b7052ac9193b638b"}}
+ :build
+ {:native-image-seconds 40.4
+  :wrapper-wall-seconds 72.12
+  :maximum-rss-kb 3791512
+  :log/sha256 "77486484f51b62d60ffefc6544c9b2752dca53c67bdbf98d0fc5282693e72ba7"}
+ :artifacts
+ {:executable {:bytes 64293120
+               :sha256 "d475952421709e95d64282937f7fe77ba0ed03a0ddf371906d35f24bfaf58f96"
+               :mode "0755"}
+  :sqlite-sidecar {:bytes 1093888
+                   :sha256 "f374da845a36d0a663521457f8e454413325e3b8247a15c2677426f4b15cf6ac"
+                   :mode "0755"}
+  :complete-distribution-bytes 65416305}
+ :native-smoke
+ {:sqlite-version "3.53.2"
+  :driver-version "3.53.2.1"
+  :database-bytes 8192
+  :first-open-ns 5766731
+  :warm-open-ns 55097
+  :verification-open-ns 38275
+  :rollback-visible-before-rollback? true
+  :rollback-persisted? false
+  :positive-authority-probes 4
+  :negative-authority-probes 11
+  :negative-category :bb4t-evaluation-failure
+  :producer/sha256 "e088152eb41de4f1467aad027b60c96319607095fa985e00d35635d0321cdf98"
+  :relocated/sha256 "7329232cd075f9d4c9ba8cf074de2aa47805cdd9aa95c55b7159d1997a4f3dce"
+  :runtime-temp-entry-count 0
+  :missing-sidecar-exit 1}
+ :startup
+ {:method {:warmups 5 :samples 30 :command "bbagent describe"}
+  :a0 {:median-ns 4700119 :p95-ns 5230217 :mean-ns 4687617}
+  :s0a {:median-ns 5121955 :p95-ns 6017357 :mean-ns 5211087}
+  :log/sha256 "f7d1051ee0602d7338a52fb19980df527fe49b1afd4c5adf409b7b184be33af0"}
+ :retained-logs
+ {:build "/tmp/bbagent-s0a-20260818d/build.log"
+  :bbagent-tests "/tmp/bbagent-s0a-20260818d/bbagent-jvm-test.log"
+  :bb4t-tests "/tmp/bbagent-s0a-20260818d/bb4t-focused-test.log"
+  :startup "/tmp/bbagent-s0a-20260818d/startup-measurements.txt"
+  :artifact-manifest "/tmp/bbagent-s0a-20260818d/build-evidence.txt"}}
