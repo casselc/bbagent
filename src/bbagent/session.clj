@@ -15,16 +15,18 @@
                           :bb4t/event event}))
 
 (defn- provider-coordinate [model-provider]
-  (let [{:keys [provider endpoint model reasoning-effort] :as description}
+  (let [{:keys [provider endpoint model reasoning-effort allow-insecure-http]
+         :as description}
         (provider/describe-provider model-provider)]
     {:description description
      :provider provider
      :endpoint endpoint
      :model model
-     :reasoning-effort reasoning-effort}))
+     :reasoning-effort reasoning-effort
+     :allow-insecure-http allow-insecure-http}))
 
 (defn- envelope [session-id run-id project model-provider system-prompt runtime]
-  (let [{:keys [provider endpoint model reasoning-effort]}
+  (let [{:keys [provider endpoint model reasoning-effort allow-insecure-http]}
         (provider-coordinate model-provider)]
     (coordinates/session-envelope
      {:session-id session-id
@@ -36,6 +38,7 @@
       :endpoint endpoint
       :model model
       :reasoning-effort reasoning-effort
+      :allow-insecure-http allow-insecure-http
       :system-prompt system-prompt})))
 
 (defn- subscribe-after-snapshot! [runtime store]
@@ -122,16 +125,22 @@
          :repl/result
          (let [request (get requests (:request/id event))
                action-id (:action/id event)
-               result (:repl/result event)]
+               result (:repl/result event)
+               assistant-message
+               (or (get action-messages action-id)
+                   {:role :assistant
+                    :content nil
+                    :actions [{:action/id action-id
+                               :action/value
+                               {:action/type :repl/eval
+                                :source (:repl/source request)}}]})]
            (-> state
                (assoc :messages
-                      (cond-> messages
-                        (get action-messages action-id)
-                        (conj (get action-messages action-id))
-                        true
-                        (conj {:role :tool
-                               :action/id action-id
-                               :content (pr-str result)})))
+                      (conj messages
+                            assistant-message
+                            {:role :tool
+                             :action/id action-id
+                             :content (pr-str result)}))
                (assoc :replay-forms
                       (conj replay-forms
                             {:source (:repl/source request)

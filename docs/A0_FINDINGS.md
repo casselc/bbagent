@@ -107,6 +107,18 @@ Response identity, model, usage when supplied, finish reason, created value, and
 integer latency are retained. Missing usage remains `nil`. Provider syntax remains in
 the one provider encoder/decoder; it is not the bb4t action ABI.
 
+Text becomes `:finish` only when the provider reports terminal `"stop"`; incomplete
+reasons such as `"length"` and `"content_filter"` fail normalization. Tool responses
+must report `"tool_calls"` and retain a non-empty provider call ID. Requests set
+`parallel_tool_calls` false, and a round-trip HTTP-stub test verifies that an
+assistant tool call ID is returned as the following tool message's `tool_call_id`.
+
+Bearer credentials are accepted over HTTPS and plaintext loopback endpoints only.
+Remote plaintext HTTP requires explicit `:allow-insecure-http true`, which is retained
+in provider configuration and the session coordinate. Loopback literals are checked
+with `InetAddress.isLoopbackAddress`, `localhost` must resolve only to loopback
+addresses, and provider requests do not follow redirects.
+
 Known leakage: neutral conversation messages retain action IDs because the provider
 requires assistant/tool correlation. A0 has no second production provider proving
 that this neutral representation is sufficient for every API.
@@ -138,6 +150,10 @@ Request/result pairs share `:request/id`; agent actions and REPL pairs additiona
 share `:action/id`. The journal removes recognized credential fields recursively.
 Provider authorization is never placed in an event. As with any local transcript,
 users must not paste credentials into ordinary user/model/REPL content.
+
+Session IDs reject `.` and `..`, continue to reject separators, and are normalized
+under the sessions root with a parent-containment assertion before any filesystem
+access.
 
 bb4t events remain a bounded diagnostic source. Selected values are copied into
 `:bb4t/event`; any snapshot drop count becomes an explicit
@@ -194,7 +210,8 @@ The journal currently records:
  :model {:provider ...
          :endpoint ...
          :model ...
-         :reasoning-effort ...}
+         :reasoning-effort ...
+         :allow-insecure-http false-or-true-or-nil-for-non-HTTP-providers}
  :world {:project/root ...
          :project/revision nil-or-SHA
          :project/dirty? nil-or-boolean
@@ -211,6 +228,10 @@ The journal currently records:
 
 Canonical hashing is order-independent for maps and sets. Tests confirm map ordering
 does not change a digest and meaningful profile/grant changes do.
+
+Git dirty provenance is tri-state: `true` means a successful status command found
+changes, `false` means a successful status command was clean, and `nil` means status
+was unavailable or failed.
 
 ## 9. Native Status
 
@@ -229,8 +250,12 @@ binary bytes           50,989,312
 binary SHA-256         5931cf9f38c2396c96fa36ed343e5a683c5e407e9d41318b7ef5ac095c8c5f3c
 ```
 
-This differs from the BB1 evidence toolchain's recorded Leiningen 2.9.8 and GraalVM
-label, so no bit-for-bit comparison or BB1 measurement reproduction is claimed.
+The `25.0.4` value is the JDK/native-image language version; `25.2.4+7.1` is the
+Oracle GraalVM distribution release containing it. They identify different toolchain
+layers rather than conflicting versions. This A0 build pins source commits but does
+not pin or validate Leiningen or GraalVM versions, and it differs from the BB1
+evidence toolchain's recorded Leiningen 2.9.8. It is therefore a source-pinned product
+build, not a fully toolchain-pinned reproducible build or BB1 measurement reproduction.
 
 The native executable passed `describe`, created a session, constructed the real
 BB1 runtime and `:agent/project-read` Context, checkpointed, exited, listed the
@@ -276,7 +301,7 @@ historical while reconstructed definitions observe current files.
 Deterministic JVM result:
 
 ```text
-20 tests, 47 assertions, 0 failures, 0 errors
+26 tests, 75 assertions, 0 failures, 0 errors
 ```
 
 ## 11. Known Nonclaims
@@ -294,6 +319,19 @@ Deterministic JVM result:
 - no live provider dogfood result;
 - no Cedar or other policy engine;
 - no claim that Git identifies all project content when the tree is dirty.
+
+BB2 must define whether RuntimeManifest `:compiled/universe` means selected source
+and dependencies or physical native reachability. The A0 application changes native
+main/AOT roots while BB1 still describes the upstream-default source universe. A
+future BuildManifest should distinguish source universe, application/build profile,
+native artifact, compiled capabilities, and a reachability coordinate. This semantic
+clarification does not change A0's bounded Context authority.
+
+Long-session storage is also explicit debt: checkpoints currently repeat complete
+messages and replay forms, and recovery reads and hydrates the complete journal. A
+later storage milestone should use incremental events, occasional content-addressed
+checkpoints, a latest-checkpoint offset/index, and streaming tail recovery. A0 does
+not introduce that framework before real usage data.
 
 ## 12. Recommendation for A1
 

@@ -19,14 +19,23 @@
 
 (defn- safe-session-id! [session-id]
   (when-not (and (string? session-id)
-                 (re-matches session-id-pattern session-id))
+                 (re-matches session-id-pattern session-id)
+                 (not (#{"." ".."} session-id)))
     (throw (errors/error :journal-storage-failure "Invalid session ID")))
   session-id)
 
 (defn session-path [root session-id]
   (safe-session-id! session-id)
-  (.resolve (.resolve (Paths/get (str root) (make-array String 0)) "sessions")
-            session-id))
+  (let [^Path sessions (-> (Paths/get (str root) (make-array String 0))
+                           .toAbsolutePath
+                           .normalize
+                           (.resolve "sessions")
+                           .normalize)
+        ^Path candidate (.normalize (.resolve sessions session-id))]
+    (when-not (= sessions (.getParent candidate))
+      (throw (errors/error :journal-storage-failure
+                           "Session path escapes the sessions root")))
+    candidate))
 
 (defn- sensitive-key? [key]
   (boolean (re-find sensitive-key-pattern

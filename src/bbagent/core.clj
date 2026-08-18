@@ -29,6 +29,19 @@
       (slurp path)
       (slurp (io/resource "bbagent/system.txt")))))
 
+(defn- true-value? [value]
+  (= "true" (some-> value str str/lower-case)))
+
+(defn- allow-insecure-http [options fallback]
+  (let [environment (some-> (System/getenv "BBAGENT_ALLOW_INSECURE_HTTP")
+                            not-empty)]
+    (cond
+      (contains? options :allow-insecure-http)
+      (true-value? (:allow-insecure-http options))
+
+      environment (true-value? environment)
+      :else (boolean (:allow-insecure-http fallback)))))
+
 (defn- model-provider [options fallback]
   (provider/openai-compatible
    {:endpoint (or (:endpoint options)
@@ -39,6 +52,7 @@
                (:model fallback))
     :reasoning-effort (or (:reasoning-effort options)
                           (:reasoning-effort fallback))
+    :allow-insecure-http (allow-insecure-http options fallback)
     :api-key (System/getenv "OPENAI_API_KEY")}))
 
 (defn- state-root [options]
@@ -92,7 +106,9 @@
   (str "bbagent run [--project PATH] [provider options]\n"
        "bbagent resume SESSION_ID [provider options]\n"
        "bbagent sessions [--state PATH]\n"
-       "bbagent inspect SESSION_ID [--state PATH]\n"))
+       "bbagent inspect SESSION_ID [--state PATH]\n"
+       "provider options: --endpoint URL --model ID [--reasoning-effort VALUE]\n"
+       "                  [--allow-insecure-http true]\n"))
 
 (defn -main [& args]
   (let [[command & command-args] args

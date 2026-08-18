@@ -11,6 +11,16 @@
         "bbagent-journal-test"
         (make-array java.nio.file.attribute.FileAttribute 0))))
 
+(deftest session-path-containment-test
+  (let [root (temp-root)]
+    (doseq [session-id ["." ".." "../foo" "foo/../bar"]]
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (journal/session-path root session-id))))
+    (doseq [session-id ["valid-session"
+                        "123e4567-e89b-12d3-a456-426614174000"]]
+      (is (= session-id
+             (str (.getFileName (journal/session-path root session-id))))))))
+
 (deftest ordered-append-and-correlation-test
   (let [root (temp-root)
         session-id (str (UUID/randomUUID))

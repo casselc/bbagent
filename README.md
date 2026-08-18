@@ -21,5 +21,9 @@ An OpenAI-compatible provider uses `OPENAI_API_KEY`, with endpoint and model
 selected through CLI options or `OPENAI_BASE_URL` and `OPENAI_MODEL`. Credentials
 are never included in journaled provider configuration.
 
+HTTPS endpoints and plaintext loopback endpoints are allowed. Plaintext HTTP to a
+non-loopback host requires the explicit `--allow-insecure-http true` override or
+`BBAGENT_ALLOW_INSECURE_HTTP=true`. Provider requests do not follow redirects.
+
 See `docs/CURRENT_SCOPE.md` for A0 boundaries and
 `docs/architecture/0001-trusted-application-inclusion.md` for native inclusion.

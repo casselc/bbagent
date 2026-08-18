@@ -4,6 +4,8 @@
             [bbagent.journal :as journal]
             [bbagent.provider :as provider]
             [bbagent.session :as session]
+            [babashka.http-client :as http]
+            [cheshire.core :as json]
             [clojure.test :refer [deftest is testing]])
   (:import [java.nio.file Files Path]))
 
@@ -157,6 +159,10 @@
                {:action/type :finish :message "Tail state recovered."})])
             :system-prompt "test prompt"})]
       (try
+        (let [[assistant-message tool-message] @(:messages second-session)]
+          (is (= "tail-action"
+                 (get-in assistant-message [:actions 0 :action/id])))
+          (is (= "tail-action" (:action/id tool-message))))
         (is (= "Tail state recovered."
                (agent/turn! second-session "Check the tail.")))
         (is (= 10
@@ -166,3 +172,41 @@
         (finally
           (session/close! second-session :test-end)
           ((:unsubscribe first-session)))))))
+
+(deftest openai-agent-tool-correlation-test
+  (let [state-root (temp-root "bbagent-openai-state")
+        requests (atom [])
+        responses
+        (atom [{:id "response-1"
+                :model "model"
+                :choices [{:finish_reason "tool_calls"
+                           :message {:content nil
+                                     :tool_calls
+                                     [{:id "call-1"
+                                       :type "function"
+                                       :function
+                                       {:name "repl_eval"
+                                        :arguments "{\"source\":\"(+ 1 2)\"}"}}]}}]}
+               {:id "response-2"
+                :model "model"
+                :choices [{:finish_reason "stop"
+                           :message {:content "three"}}]}])
+        model (provider/openai-compatible
+               {:endpoint "https://example.test/v1/chat/completions"
+                :model "model" :api-key "not-journaled"})
+        agent-session (session/start! {:state-root state-root
+                                       :project-root (project)
+                                       :model-provider model
+                                       :system-prompt "test prompt"})]
+    (try
+      (with-redefs [http/post
+                    (fn [_ options]
+                      (swap! requests conj (json/parse-string (:body options) true))
+                      (let [response (first @responses)]
+                        (swap! responses #(vec (rest %)))
+                        {:status 200 :body (json/generate-string response)}))]
+        (is (= "three" (agent/turn! agent-session "Calculate.")))
+        (let [second-messages (:messages (second @requests))]
+          (is (= "call-1" (get-in second-messages [2 :tool_calls 0 :id])))
+          (is (= "call-1" (get-in second-messages [3 :tool_call_id])))))
+      (finally (session/close! agent-session :test-end)))))

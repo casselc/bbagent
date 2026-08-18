@@ -67,15 +67,20 @@
   (or (some-> (io/resource resource-name) slurp str/trim not-empty)
       "unknown"))
 
-(defn- git-output [root & args]
+(defn- git-command [root & args]
   (try
     (let [command (into ["git" "-C" root] args)
           process (.start (ProcessBuilder. ^java.util.List command))
           stdout (future (slurp (.getInputStream process)))
-          _ (future (slurp (.getErrorStream process)))
+          stderr (future (slurp (.getErrorStream process)))
           status (.waitFor process)]
-      (when (zero? status) (some-> @stdout str/trim not-empty)))
+      @stderr
+      {:status status :output (str/trim @stdout)})
     (catch Throwable _ nil)))
+
+(defn- successful-output [result]
+  (when (and result (zero? (:status result)))
+    (not-empty (:output result))))
 
 (defn- safe-repository [repository]
   (when repository
@@ -95,22 +100,26 @@
   (let [^Path path (.toRealPath (Paths/get (str root) (make-array String 0))
                                (make-array LinkOption 0))
         canonical-root (str path)
-        revision (git-output canonical-root "rev-parse" "HEAD")]
+        revision (successful-output
+                  (git-command canonical-root "rev-parse" "HEAD"))
+        status-result (when revision
+                        (git-command canonical-root "status" "--porcelain"))]
     {:project/root canonical-root
      :project/revision revision
-     :project/dirty? (when revision
-                       (boolean (seq (git-output canonical-root "status"
-                                                "--porcelain"))))
+     :project/dirty? (when (and status-result (zero? (:status status-result)))
+                       (boolean (seq (:output status-result))))
      :project/repository (safe-repository
-                          (git-output canonical-root "config" "--get"
-                                      "remote.origin.url"))}))
+                          (successful-output
+                           (git-command canonical-root "config" "--get"
+                                        "remote.origin.url")))}))
 
 (defn new-session-id [] (str (UUID/randomUUID)))
 (defn new-run-id [] (str (UUID/randomUUID)))
 
 (defn session-envelope
   [{:keys [session-id run-id runtime-description context-description project
-           provider endpoint model reasoning-effort system-prompt]}]
+           provider endpoint model reasoning-effort allow-insecure-http
+           system-prompt]}]
   (let [manifest (:runtime/manifest runtime-description)
         spec (:context/spec context-description)
         effective (:context/effective context-description)]
@@ -125,7 +134,8 @@
      :model {:provider provider
              :endpoint endpoint
              :model model
-             :reasoning-effort reasoning-effort}
+             :reasoning-effort reasoning-effort
+             :allow-insecure-http allow-insecure-http}
      :world project
      :context {:profile (:profile spec)
                :context-spec/digest

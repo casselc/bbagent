@@ -28,7 +28,10 @@
 
 (defn- tool-action [tool-call]
   (try
-    (let [function (:function tool-call)
+    (let [action-id (:id tool-call)
+          _ (when-not (and (string? action-id) (not (str/blank? action-id)))
+              (throw (ex-info "Provider tool call has no ID" {})))
+          function (:function tool-call)
           arguments (parse-arguments (:arguments function))
           candidate (case (:name function)
                       "repl_eval" {:action/type :repl/eval
@@ -36,7 +39,7 @@
                       "finish" {:action/type :finish
                                 :message (:message arguments)}
                       (throw (ex-info "Unknown provider tool" {})))]
-      {:action/id (or (:id tool-call) (str (UUID/randomUUID)))
+      {:action/id action-id
        :action/value (action/normalize candidate)})
     (catch clojure.lang.ExceptionInfo failure
       (if (= :provider-malformed-response
@@ -53,13 +56,29 @@
           message (:message choice)
           tool-calls (:tool_calls message)
           content (:content message)
-          actions (if (seq tool-calls)
-                    (mapv tool-action tool-calls)
-                    (when (string? content)
-                      [{:action/id (str (UUID/randomUUID))
-                        :action/value (action/normalize
-                                       {:action/type :finish
-                                        :message content})}]))]
+          finish-reason (:finish_reason choice)
+          actions
+          (cond
+            (seq tool-calls)
+            (do
+              (when-not (= "tool_calls" finish-reason)
+                (throw (errors/error :provider-malformed-response
+                                     "Provider tool response has a non-tool finish reason"
+                                     {:finish-reason finish-reason})))
+              (mapv tool-action tool-calls))
+
+            (string? content)
+            (do
+              (when-not (= "stop" finish-reason)
+                (throw (errors/error :provider-malformed-response
+                                     "Provider returned incomplete textual content"
+                                     {:finish-reason finish-reason})))
+              [{:action/id (str (UUID/randomUUID))
+                :action/value (action/normalize
+                               {:action/type :finish
+                                :message content})}])
+
+            :else nil)]
       (when-not (and choice (seq actions))
         (throw (errors/error :provider-malformed-response
                              "Provider response has no usable action"
@@ -69,7 +88,7 @@
        :response/id (:id body)
        :created (:created body)
        :usage (when (contains? body :usage) (:usage body))
-       :finish-reason (:finish_reason choice)
+       :finish-reason finish-reason
        :latency-ms latency-ms
        :message {:role :assistant
                  :content content
@@ -124,25 +143,39 @@
     :tool {:role "tool" :tool_call_id id :content content}
     {:role (name role) :content content}))
 
-(defrecord OpenAICompatibleProvider [endpoint model api-key timeout-ms reasoning-effort]
+(defn- loopback-host? [host]
+  (try
+    (let [numeric? (boolean (or (re-matches #"[0-9.]+" host)
+                                (str/includes? host ":")))
+          addresses (when (or numeric? (= "localhost" host))
+                      (java.net.InetAddress/getAllByName host))]
+      (and (seq addresses)
+           (every? #(.isLoopbackAddress ^java.net.InetAddress %) addresses)))
+    (catch Throwable _ false)))
+
+(defrecord OpenAICompatibleProvider
+  [endpoint model api-key timeout-ms reasoning-effort allow-insecure-http http-client]
   ModelProvider
   (describe-provider [_]
     {:provider :openai-compatible
      :endpoint endpoint
      :model model
-     :reasoning-effort reasoning-effort})
+     :reasoning-effort reasoning-effort
+     :allow-insecure-http allow-insecure-http})
   (complete [_ request]
     (let [started (Instant/now)
           request-body
           (cond-> {:model model
                    :messages (mapv encode-message (:messages request))
                    :tools tools
-                   :tool_choice "auto"}
+                   :tool_choice "auto"
+                   :parallel_tool_calls false}
             reasoning-effort (assoc :reasoning_effort reasoning-effort))]
       (try
         (let [response (http/post endpoint
                                   {:headers {"content-type" "application/json"}
                                    :oauth-token api-key
+                                   :client http-client
                                    :body (json/generate-string request-body)
                                    :timeout timeout-ms
                                    :throw false})
@@ -169,7 +202,7 @@
                                {:error/type (.getName (class failure))} failure)))))))
 
 (defn openai-compatible
-  [{:keys [endpoint model api-key timeout-ms reasoning-effort]
+  [{:keys [endpoint model api-key timeout-ms reasoning-effort allow-insecure-http]
     :or {timeout-ms 120000}}]
   (when (or (str/blank? endpoint) (str/blank? model) (str/blank? api-key))
     (throw (errors/error :provider-failure
@@ -178,13 +211,22 @@
               (java.net.URI/create endpoint)
               (catch Throwable failure
                 (throw (errors/error :provider-failure
-                                     "Provider endpoint is invalid" nil failure))))]
-    (when (or (not (#{"http" "https"} (.getScheme uri)))
+                                     "Provider endpoint is invalid" nil failure))))
+        scheme (some-> (.getScheme uri) str/lower-case)]
+    (when (or (not (#{"http" "https"} scheme))
               (str/blank? (.getHost uri))
               (.getUserInfo uri) (.getQuery uri) (.getFragment uri))
       (throw (errors/error :provider-failure
-                           "Provider endpoint must be an HTTP(S) URL without credentials, query, or fragment"))))
-  (->OpenAICompatibleProvider endpoint model api-key timeout-ms reasoning-effort))
+                           "Provider endpoint must be an HTTP(S) URL without credentials, query, or fragment")))
+    (let [host (str/lower-case (.getHost uri))]
+      (when (and (= "http" scheme)
+                 (not (loopback-host? host))
+                 (not allow-insecure-http))
+        (throw (errors/error :provider-failure
+                             "Plaintext HTTP is restricted to loopback provider endpoints")))))
+  (->OpenAICompatibleProvider endpoint model api-key timeout-ms reasoning-effort
+                              (boolean allow-insecure-http)
+                              (http/client {:follow-redirects :never})))
 
 (defrecord FakeProvider [responses description]
   ModelProvider
