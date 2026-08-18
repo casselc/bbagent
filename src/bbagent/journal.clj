@@ -27,9 +27,12 @@
 (defn session-path [root session-id]
   (safe-session-id! session-id)
   (let [^Path root-path (Paths/get (str root) (make-array String 0))
-        ^Path absolute-root (.normalize (.toAbsolutePath root-path))
-        ^Path sessions (.normalize (.resolve absolute-root "sessions"))
-        ^Path candidate (.normalize (.resolve sessions session-id))]
+        ^Path absolute-path (.toAbsolutePath root-path)
+        ^Path absolute-root (.normalize absolute-path)
+        ^Path unresolved-sessions (.resolve absolute-root "sessions")
+        ^Path sessions (.normalize unresolved-sessions)
+        ^Path unresolved-candidate (.resolve sessions session-id)
+        ^Path candidate (.normalize unresolved-candidate)]
     (when-not (= sessions (.getParent candidate))
       (throw (errors/error :journal-storage-failure
                            "Session path escapes the sessions root")))
