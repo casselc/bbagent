@@ -3,9 +3,11 @@
             [bbagent.coordinates-test]
             [bbagent.integration-test]
             [bbagent.journal-test]
-            [bbagent.provider-test]
-            [bbagent.sqlite-test]
-            [clojure.test :as test])
+             [bbagent.provider-test]
+             [bbagent.sqlite-store-test]
+             [bbagent.sqlite-test]
+             [bbagent.store-contract-test]
+             [clojure.test :as test])
   (:gen-class))
 
 (defn -main [& _]
@@ -15,6 +17,8 @@
                         'bbagent.integration-test
                         'bbagent.journal-test
                         'bbagent.provider-test
-                        'bbagent.sqlite-test)]
+                        'bbagent.sqlite-store-test
+                        'bbagent.sqlite-test
+                        'bbagent.store-contract-test)]
     (when (pos? (+ fail error))
       (System/exit 1))))

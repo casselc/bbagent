@@ -1,15 +1,16 @@
-# Current Scope: S0a
+# Current Scope: S0b
 
-S0a asks whether the custom bb4t + bbagent native application can reliably use
-JNI-backed SQLite from trusted host code while the accepted A0 bounded SCI Context
-retains exactly its existing authority.
+S0b asks whether SQLite can implement the accepted A0 durable event journal and
+content-addressed object semantics more simply and scalably without weakening
+durability, recovery, provenance, or the bounded SCI authority proven by S0a.
 
-Owned work is limited to application-scoped `next.jdbc` and `sqlite-jdbc`
-dependencies, one file-backed commit/reopen/rollback smoke operation, exported native
-library packaging, JVM/native evidence, model-authority negative probes, measurements,
-licensing notices, and findings.
+Owned work is limited to a small file/SQLite store contract, one local database per
+application state root, canonical event and object persistence, conservative SQLite
+durability policy, transactional schema versioning, differential recovery tests,
+explicit backend selection, native create/resume evidence, measurements, and findings.
 
-S0a does not replace or modify the EDN-lines journal, design storage abstractions,
-migrate sessions, add FTS/vector search, expose SQL or JDBC to agents, add project
-search/edit/process authority, build the TUI, introduce other storage/runtime systems,
-begin BB2 broadly, or change Track A. Stop after findings and review.
+The EDN-lines journal remains the reference backend. S0b does not redesign agent
+memory, prompts, the model loop, or the TUI; expose SQL, JDBC, database paths, or
+trusted storage namespaces to model SCI; add FTS, vectors, editing, processes,
+multi-agent behavior, replication, or other storage systems; begin A1 or BB2 broadly;
+or change Track A. Stop after findings and fresh review.

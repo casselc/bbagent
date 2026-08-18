@@ -1,13 +1,16 @@
 (ns bbagent.agent-test
   (:require [bbagent.agent :as agent]
             [bbagent.bb4t :as bb4t]
-            [bbagent.journal :as journal]
             [bbagent.provider :as provider]
             [bbagent.session :as session]
+            [bbagent.storage :as storage]
+            [bbagent.store :as store]
             [babashka.http-client :as http]
             [cheshire.core :as json]
             [clojure.test :refer [deftest is testing]])
-  (:import [java.nio.file Files Path]))
+  (:import [java.nio.file Files LinkOption Path Paths]))
+
+(def ^:private backends [:file :sqlite])
 
 (defn- temp-root [prefix]
   (str (Files/createTempDirectory
@@ -21,157 +24,280 @@
                        (make-array java.nio.file.OpenOption 0))
     (str root)))
 
+(defn- path-exists? [root child]
+  (Files/exists (.resolve (Paths/get root (make-array String 0)) child)
+                (make-array LinkOption 0)))
+
+(defn- error-category [thunk]
+  (try (thunk) nil
+       (catch clojure.lang.ExceptionInfo failure
+         (:bbagent/error (ex-data failure)))))
+
+(deftest store-backend-selection-test
+  (testing "backend values normalize to :file or :sqlite"
+    (is (= :file (storage/backend nil)))
+    (is (= :file (storage/backend :file)))
+    (is (= :file (storage/backend "file")))
+    (is (= :sqlite (storage/backend :sqlite)))
+    (is (= :sqlite (storage/backend "sqlite"))))
+  (testing "other values are rejected clearly"
+    (is (= :journal-storage-failure (error-category #(storage/backend :memory))))
+    (is (= :journal-storage-failure (error-category #(storage/backend "memory"))))
+    (is (= :journal-storage-failure (error-category #(storage/backend 42))))))
+
+(deftest store-backend-artifacts-test
+  (testing "file remains the default backend"
+    (let [state-root (temp-root "bbagent-default-state")
+          agent-session (session/start! {:state-root state-root
+                                         :project-root (project)
+                                         :model-provider (provider/fake [])
+                                         :system-prompt "test prompt"})]
+      (try
+        (is (path-exists? state-root "sessions"))
+        (is (not (path-exists? state-root "bbagent.sqlite3")))
+        (finally (session/close! agent-session :test-end)))))
+  (testing "sqlite keeps the database at state-root/bbagent.sqlite3"
+    (let [state-root (temp-root "bbagent-sqlite-state")
+          agent-session (session/start! {:state-root state-root
+                                         :project-root (project)
+                                         :model-provider (provider/fake [])
+                                         :system-prompt "test prompt"
+                                         :store-backend :sqlite})]
+      (try
+        (is (path-exists? state-root "bbagent.sqlite3"))
+        (finally (session/close! agent-session :test-end))))))
+
 (deftest fake-provider-end-to-end-test
-  (let [state-root (temp-root "bbagent-agent-state")
-        model (provider/fake
-               [(provider/fake-response
-                 {:action/type :repl/eval
-                  :source "(def project-summary (project/read \"README.md\"))"})
-                (provider/fake-response
-                 {:action/type :finish
-                  :message "The fixture is described by README.md."})])
-        agent-session (session/start! {:state-root state-root
-                                       :project-root (project)
-                                       :model-provider model
-                                       :system-prompt "test prompt"})]
-    (try
-      (is (= "The fixture is described by README.md."
-             (agent/turn! agent-session "What does this project do?")))
-      (let [events (session/session-events agent-session)
-            event-types (set (map :event/type events))]
-        (is (every? event-types
-                    [:session/started :user/message :model/request
-                     :model/response :agent/action :repl/request
-                     :repl/result :bb4t/event :session/checkpoint]))
-        (is (= :ok (->> events
-                        (filter #(= :repl/result (:event/type %)))
-                        first :repl/result :status))))
-      (finally (session/close! agent-session :test-end)))))
+  (doseq [backend backends]
+    (testing (str "backend " (name backend))
+      (let [state-root (temp-root "bbagent-agent-state")
+            model (provider/fake
+                   [(provider/fake-response
+                     {:action/type :repl/eval
+                      :source "(def project-summary (project/read \"README.md\"))"})
+                    (provider/fake-response
+                     {:action/type :finish
+                      :message "The fixture is described by README.md."})])
+            agent-session (session/start! {:state-root state-root
+                                           :project-root (project)
+                                           :model-provider model
+                                           :system-prompt "test prompt"
+                                           :store-backend backend})]
+        (try
+          (is (= "The fixture is described by README.md."
+                 (agent/turn! agent-session "What does this project do?")))
+          (let [events (session/session-events agent-session)
+                event-types (set (map :event/type events))]
+            (is (every? event-types
+                        [:session/started :user/message :model/request
+                         :model/response :agent/action :repl/request
+                         :repl/result :bb4t/event :session/checkpoint]))
+            (is (= :ok (->> events
+                            (filter #(= :repl/result (:event/type %)))
+                            first :repl/result :status))))
+          (finally (session/close! agent-session :test-end)))))))
 
 (deftest restart-resume-test
-  (let [state-root (temp-root "bbagent-resume-state")
-        project-root (project)
-        first-session
-        (session/start! {:state-root state-root
-                         :project-root project-root
-                         :model-provider
-                         (provider/fake
-                          [(provider/fake-response
-                            {:action/type :repl/eval
-                             :source "(def saved-value 41)"})
-                           (provider/fake-response
-                            {:action/type :finish :message "saved"})])
-                         :system-prompt "test prompt"})
-        session-id (:session-id first-session)]
-    (is (= "saved" (agent/turn! first-session "Save a value.")))
-    (session/close! first-session :restart-test)
-    (let [second-session
-          (session/resume!
-           {:state-root state-root
-            :session-id session-id
-            :model-provider
-            (provider/fake
-             [(provider/fake-response
-               {:action/type :repl/eval :source "(+ saved-value 1)"})
-              (provider/fake-response
-               {:action/type :finish :message "The resumed value is 42."})])
-            :system-prompt "test prompt"})]
-      (try
-        (is (= session-id (:session-id second-session)))
-        (is (= "The resumed value is 42."
-               (agent/turn! second-session "Continue.")))
-        (is (= 42
-               (->> (session/session-events second-session)
-                    (filter #(= :repl/result (:event/type %)))
-                    last :repl/result :evaluation :value :value/data)))
-        (finally (session/close! second-session :test-end))))))
+  (doseq [backend backends]
+    (testing (str "backend " (name backend))
+      (let [state-root (temp-root "bbagent-resume-state")
+            project-root (project)
+            first-session
+            (session/start! {:state-root state-root
+                             :project-root project-root
+                             :model-provider
+                             (provider/fake
+                              [(provider/fake-response
+                                {:action/type :repl/eval
+                                 :source "(def saved-value 41)"})
+                               (provider/fake-response
+                                {:action/type :finish :message "saved"})])
+                             :system-prompt "test prompt"
+                             :store-backend backend})
+            session-id (:session-id first-session)]
+        (is (= "saved" (agent/turn! first-session "Save a value.")))
+        (session/close! first-session :restart-test)
+        (let [second-session
+              (session/resume!
+               {:state-root state-root
+                :session-id session-id
+                :model-provider
+                (provider/fake
+                 [(provider/fake-response
+                   {:action/type :repl/eval :source "(+ saved-value 1)"})
+                  (provider/fake-response
+                   {:action/type :finish :message "The resumed value is 42."})])
+                :system-prompt "test prompt"
+                :store-backend backend})]
+          (try
+            (is (= session-id (:session-id second-session)))
+            (is (= "The resumed value is 42."
+                   (agent/turn! second-session "Continue.")))
+            (is (= 42
+                   (->> (session/session-events second-session)
+                        (filter #(= :repl/result (:event/type %)))
+                        last :repl/result :evaluation :value :value/data)))
+            (finally (session/close! second-session :test-end))))))))
 
 (deftest failed-form-mutations-are-replayed-test
-  (let [state-root (temp-root "bbagent-failed-replay-state")
-        project-root (project)
-        first-session
-        (session/start!
-         {:state-root state-root
-          :project-root project-root
-          :model-provider
-          (provider/fake
-           [(provider/fake-response
-             {:action/type :repl/eval
-              :source "(do (def survived 41) (/ 1 0))"})
-            (provider/fake-response
-             {:action/type :finish :message "failure observed"})])
-          :system-prompt "test prompt"})
-        session-id (:session-id first-session)]
-    (is (= "failure observed" (agent/turn! first-session "Try a partial form.")))
-    (session/close! first-session :restart-test)
-    (let [second-session
-          (session/resume!
-           {:state-root state-root
-            :session-id session-id
-            :model-provider
-            (provider/fake
-             [(provider/fake-response
-               {:action/type :repl/eval :source "(+ survived 1)"})
-              (provider/fake-response
-               {:action/type :finish :message "Partial state recovered."})])
-            :system-prompt "test prompt"})]
-      (try
-        (is (= "Partial state recovered."
-               (agent/turn! second-session "Check the partial state.")))
-        (is (= 42
-               (->> (session/session-events second-session)
-                    (filter #(= :repl/result (:event/type %)))
-                    last :repl/result :evaluation :value :value/data)))
-        (finally (session/close! second-session :test-end))))))
+  (doseq [backend backends]
+    (testing (str "backend " (name backend))
+      (let [state-root (temp-root "bbagent-failed-replay-state")
+            project-root (project)
+            first-session
+            (session/start!
+             {:state-root state-root
+              :project-root project-root
+              :model-provider
+              (provider/fake
+               [(provider/fake-response
+                 {:action/type :repl/eval
+                  :source "(do (def survived 41) (/ 1 0))"})
+                (provider/fake-response
+                 {:action/type :finish :message "failure observed"})])
+              :system-prompt "test prompt"
+              :store-backend backend})
+            session-id (:session-id first-session)]
+        (is (= "failure observed" (agent/turn! first-session "Try a partial form.")))
+        (session/close! first-session :restart-test)
+        (let [second-session
+              (session/resume!
+               {:state-root state-root
+                :session-id session-id
+                :model-provider
+                (provider/fake
+                 [(provider/fake-response
+                   {:action/type :repl/eval :source "(+ survived 1)"})
+                  (provider/fake-response
+                   {:action/type :finish :message "Partial state recovered."})])
+                :system-prompt "test prompt"
+                :store-backend backend})]
+          (try
+            (is (= "Partial state recovered."
+                   (agent/turn! second-session "Check the partial state.")))
+            (is (= 42
+                   (->> (session/session-events second-session)
+                        (filter #(= :repl/result (:event/type %)))
+                        last :repl/result :evaluation :value :value/data)))
+            (finally (session/close! second-session :test-end))))))))
 
 (deftest durable-result-tail-is-folded-on-resume-test
-  (let [state-root (temp-root "bbagent-tail-state")
-        project-root (project)
-        first-session
-        (session/start! {:state-root state-root
-                         :project-root project-root
-                         :model-provider (provider/fake [])
-                         :system-prompt "test prompt"})
-        session-id (:session-id first-session)
-        request-id "tail-request"
-        action-id "tail-action"
-        source "(def tail-value 9)"
-        result (bb4t/evaluate (:bb4t first-session) source)]
-    (journal/append! (:journal first-session)
-                     {:event/type :repl/request
-                      :request/id request-id
-                      :action/id action-id
-                      :repl/source source})
-    (journal/append! (:journal first-session)
-                     {:event/type :repl/result
-                      :request/id request-id
-                      :action/id action-id
-                      :repl/result result})
-    (let [second-session
-          (session/resume!
-           {:state-root state-root
-            :session-id session-id
-            :model-provider
-            (provider/fake
-             [(provider/fake-response
-               {:action/type :repl/eval :source "(+ tail-value 1)"})
-              (provider/fake-response
-               {:action/type :finish :message "Tail state recovered."})])
-            :system-prompt "test prompt"})]
-      (try
-        (let [[assistant-message tool-message] @(:messages second-session)]
-          (is (= "tail-action"
-                 (get-in assistant-message [:actions 0 :action/id])))
-          (is (= "tail-action" (:action/id tool-message))))
-        (is (= "Tail state recovered."
-               (agent/turn! second-session "Check the tail.")))
-        (is (= 10
-               (->> (session/session-events second-session)
-                    (filter #(= :repl/result (:event/type %)))
-                    last :repl/result :evaluation :value :value/data)))
-        (finally
-          (session/close! second-session :test-end)
-          ((:unsubscribe first-session)))))))
+  (doseq [backend backends]
+    (testing (str "backend " (name backend))
+      (let [state-root (temp-root "bbagent-tail-state")
+            project-root (project)
+            first-session
+            (session/start! {:state-root state-root
+                             :project-root project-root
+                             :model-provider (provider/fake [])
+                             :system-prompt "test prompt"
+                             :store-backend backend})
+            session-id (:session-id first-session)
+            request-id "tail-request"
+            action-id "tail-action"
+            source "(def tail-value 9)"
+            result (bb4t/evaluate (:bb4t first-session) source)]
+        (store/append-event! (:store first-session) session-id
+                             {:event/type :repl/request
+                              :request/id request-id
+                              :action/id action-id
+                              :repl/source source})
+        (store/append-event! (:store first-session) session-id
+                             {:event/type :repl/result
+                              :request/id request-id
+                              :action/id action-id
+                              :repl/result result})
+        (let [second-session
+              (session/resume!
+               {:state-root state-root
+                :session-id session-id
+                :model-provider
+                (provider/fake
+                 [(provider/fake-response
+                   {:action/type :repl/eval :source "(+ tail-value 1)"})
+                  (provider/fake-response
+                   {:action/type :finish :message "Tail state recovered."})])
+                :system-prompt "test prompt"
+                :store-backend backend})]
+          (try
+            (let [[assistant-message tool-message] @(:messages second-session)]
+              (is (= "tail-action"
+                     (get-in assistant-message [:actions 0 :action/id])))
+              (is (= "tail-action" (:action/id tool-message))))
+            (is (= "Tail state recovered."
+                   (agent/turn! second-session "Check the tail.")))
+            (is (= 10
+                   (->> (session/session-events second-session)
+                        (filter #(= :repl/result (:event/type %)))
+                        last :repl/result :evaluation :value :value/data)))
+            (finally
+              (session/close! second-session :test-end)
+              ((:unsubscribe first-session))
+              (store/close-store! (:store first-session)))))))))
+
+(deftest unresolved-tail-request-fails-recovery-test
+  (doseq [backend backends]
+    (testing (str "backend " (name backend))
+      (let [state-root (temp-root "bbagent-unresolved-state")
+            first-session
+            (session/start! {:state-root state-root
+                             :project-root (project)
+                             :model-provider (provider/fake [])
+                             :system-prompt "test prompt"
+                             :store-backend backend})
+            session-id (:session-id first-session)]
+        (store/append-event! (:store first-session) session-id
+                             {:event/type :repl/request
+                              :request/id "interrupted-request"
+                              :action/id "interrupted-action"
+                              :repl/source "(def interrupted 1)"})
+        ((:unsubscribe first-session))
+        (store/close-store! (:store first-session))
+        (is (= :session-recovery-failure
+               (error-category
+                #(session/resume! {:state-root state-root
+                                   :session-id session-id
+                                   :model-provider (provider/fake [])
+                                   :system-prompt "test prompt"
+                                   :store-backend backend}))))))))
+
+(deftest coordinate-preservation-test
+  (doseq [backend backends]
+    (testing (str "backend " (name backend))
+      (let [state-root (temp-root "bbagent-coordinate-state")
+            project-root (project)
+            first-session
+            (session/start! {:state-root state-root
+                             :project-root project-root
+                             :model-provider (provider/fake [])
+                             :system-prompt "test prompt"
+                             :store-backend backend})
+            session-id (:session-id first-session)
+            started-coordinate (:coordinate first-session)]
+        (is (= session-id (:session/id started-coordinate)))
+        (is (= :fake (get-in started-coordinate [:model :provider])))
+        (is (= {:kind :persistent-sci :version 1}
+               (:surface started-coordinate)))
+        (session/close! first-session :restart-test)
+        (let [second-session
+              (session/resume! {:state-root state-root
+                                :session-id session-id
+                                :model-provider (provider/fake [])
+                                :system-prompt "test prompt"
+                                :store-backend backend})]
+          (try
+            (is (= session-id (get-in second-session [:coordinate :session/id])))
+            (is (= (get-in started-coordinate [:world :project/root])
+                   (get-in second-session [:coordinate :world :project/root])))
+            (is (= (:surface started-coordinate)
+                   (get-in second-session [:coordinate :surface])))
+            (let [resumed (last (filter #(= :session/resumed (:event/type %))
+                                        (session/session-events
+                                         second-session)))]
+              (is (some? resumed))
+              (is (false? (:world/changed? resumed)))
+              (is (= (:session/id (:session/coordinate resumed)) session-id)))
+            (finally (session/close! second-session :test-end))))))))
 
 (deftest openai-agent-tool-correlation-test
   (let [state-root (temp-root "bbagent-openai-state")

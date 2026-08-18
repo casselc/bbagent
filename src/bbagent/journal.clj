@@ -1,28 +1,20 @@
 (ns bbagent.journal
   (:require [bbagent.coordinates :as coordinates]
             [bbagent.errors :as errors]
+            [bbagent.store :as store]
             [clojure.edn :as edn]
             [clojure.string :as str])
   (:import [java.nio ByteBuffer]
            [java.nio.charset StandardCharsets]
            [java.nio.file CopyOption Files LinkOption OpenOption Path Paths
             StandardCopyOption StandardOpenOption]
-           [java.time Instant]
-           [java.util UUID]))
-
-(def ^:private blob-threshold-bytes 65536)
-(def ^:private session-id-pattern #"[A-Za-z0-9._-]+")
-(def ^:private sensitive-key-pattern
-  #"(?i)^(api[-_]?key|authorization|credentials?|password|secret|token|access[-_]?token|refresh[-_]?token|oauth[-_]?token)$")
+           [java.util UUID]
+           [java.util.concurrent ConcurrentHashMap]))
 
 (defrecord Journal [^Path root ^Path path ^Path blobs state lock])
 
 (defn- safe-session-id! [session-id]
-  (when-not (and (string? session-id)
-                 (re-matches session-id-pattern session-id)
-                 (not (#{"." ".."} session-id)))
-    (throw (errors/error :journal-storage-failure "Invalid session ID")))
-  session-id)
+  (store/validate-session-id! session-id))
 
 (defn session-path [root session-id]
   (safe-session-id! session-id)
@@ -37,20 +29,6 @@
       (throw (errors/error :journal-storage-failure
                            "Session path escapes the sessions root")))
     candidate))
-
-(defn- sensitive-key? [key]
-  (boolean (re-find sensitive-key-pattern
-                    (if (keyword? key) (name key) (str key)))))
-
-(defn- without-secrets [value]
-  (cond
-    (map? value) (into {} (keep (fn [[key item]]
-                                  (when-not (sensitive-key? key)
-                                    [key (without-secrets item)]))) value)
-    (vector? value) (mapv without-secrets value)
-    (list? value) (apply list (map without-secrets value))
-    (set? value) (set (map without-secrets value))
-    :else value))
 
 (defn- write-bytes! [^Path path bytes]
   (let [temporary (.resolveSibling
@@ -77,26 +55,18 @@
       (and (= (alength bytes) (alength existing))
            (= digest (coordinates/sha-256 content))))))
 
-(defn- externalize [^Path blobs value]
-  (cond
-    (and (string? value)
-         (> (alength (.getBytes ^String value StandardCharsets/UTF_8))
-            blob-threshold-bytes))
-    (let [digest (coordinates/sha-256 value)
-          path (.resolve blobs digest)
-          bytes (.getBytes ^String value StandardCharsets/UTF_8)]
+(defn- blob-storer [^Path blobs]
+  (fn [digest ^String value]
+    (let [path (.resolve blobs digest)
+          bytes (.getBytes value StandardCharsets/UTF_8)]
       (when-not (valid-blob? path digest bytes)
-        (write-bytes! path bytes))
-      (tagged-literal 'bbagent/blob
-                      {:digest (str "sha256:" digest)
-                       :bytes (alength bytes)
-                       :encoding :utf-8}))
+        (write-bytes! path bytes)))))
 
-    (map? value) (into {} (map (fn [[key item]] [key (externalize blobs item)])) value)
-    (vector? value) (mapv #(externalize blobs %) value)
-    (list? value) (apply list (map #(externalize blobs %) value))
-    (set? value) (set (map #(externalize blobs %) value))
-    :else value))
+(defn- blob-loader [^Path blobs]
+  (fn [digest]
+    (let [path (.resolve blobs digest)]
+      (when (Files/isRegularFile path (make-array LinkOption 0))
+        (String. (Files/readAllBytes path) StandardCharsets/UTF_8)))))
 
 (defn- decode-line [line]
   (let [{:journal/keys [version event checksum] :as record}
@@ -107,42 +77,9 @@
       (throw (ex-info "Malformed journal record" {})))
     (when-not (= 1 version)
       (throw (ex-info "Unsupported journal version" {:version version})))
-    (when-not (= checksum (coordinates/digest :bbagent/journal-event event))
+    (when-not (= checksum (store/semantic-checksum event))
       (throw (ex-info "Journal checksum mismatch" {})))
     event))
-
-(defn- blob-reference? [value]
-  (and (instance? clojure.lang.TaggedLiteral value)
-       (= 'bbagent/blob (:tag value))))
-
-(defn- hydrate [^Path blobs value]
-  (cond
-    (blob-reference? value)
-    (let [reference (:form value)
-          _ (when-not (= #{:digest :bytes :encoding} (set (keys reference)))
-              (throw (ex-info "Malformed journal blob reference" {})))
-          digest (:digest reference)
-          hex (when (str/starts-with? digest "sha256:") (subs digest 7))
-          path (when hex (.resolve blobs hex))]
-      (when-not (and (= :utf-8 (:encoding reference))
-                     (integer? (:bytes reference))
-                     hex (re-matches #"[0-9a-f]{64}" hex)
-                     (Files/isRegularFile path (make-array LinkOption 0)))
-        (throw (ex-info "Journal blob is missing or malformed"
-                        {:blob/digest digest})))
-      (let [bytes (Files/readAllBytes path)
-            content (String. bytes StandardCharsets/UTF_8)]
-        (when-not (and (= (:bytes reference) (alength bytes))
-                       (= hex (coordinates/sha-256 content)))
-          (throw (ex-info "Journal blob integrity check failed"
-                          {:blob/digest digest})))
-        content))
-
-    (map? value) (into {} (map (fn [[key item]] [key (hydrate blobs item)])) value)
-    (vector? value) (mapv #(hydrate blobs %) value)
-    (list? value) (apply list (map #(hydrate blobs %) value))
-    (set? value) (set (map #(hydrate blobs %) value))
-    :else value))
 
 (defn recover [path]
   (let [^Path path (Paths/get (str path) (make-array String 0))]
@@ -153,24 +90,33 @@
             parts (str/split text #"\n" -1)
             lines (vec (butlast parts))
             tail-discarded? (and (not terminated?) (boolean (seq (last parts))))
-            blobs (.resolve (.getParent path) "blobs")]
+            blobs (.resolve (.getParent path) "blobs")
+            load-blob (blob-loader blobs)]
         (try
           (loop [remaining lines
                  expected-seq 1
                  stored-events []
-                 valid-lines []]
+                 valid-lines []
+                 seen-ids #{}]
             (if-let [line (first remaining)]
               (do
                 (when (str/blank? line)
                   (throw (ex-info "Blank journal record" {})))
-                (let [event (decode-line line)]
+                (let [event (decode-line line)
+                      event-id (:event/id event)]
                   (when-not (= expected-seq (:event/seq event))
                     (throw (ex-info "Journal event sequence is discontinuous"
                                     {:expected expected-seq
                                      :actual (:event/seq event)})))
+                  (when (and (some? event-id) (contains? seen-ids event-id))
+                    (throw (ex-info "Duplicate journal event ID"
+                                    {:event/id event-id})))
                   (recur (subvec remaining 1) (inc expected-seq)
-                         (conj stored-events event) (conj valid-lines line))))
-              {:events (mapv #(hydrate blobs %) stored-events)
+                         (conj stored-events event) (conj valid-lines line)
+                         (if (some? event-id)
+                           (conj seen-ids event-id)
+                           seen-ids))))
+              {:events (mapv #(store/hydrate load-blob %) stored-events)
                :valid-lines valid-lines
                :tail-discarded? tail-discarded?}))
           (catch Throwable failure
@@ -191,7 +137,10 @@
                         (str (str/join "\n" valid-lines) "\n")
                         "")]
             (write-bytes! path (.getBytes valid StandardCharsets/UTF_8))))
-        (->Journal directory path blobs (atom {:events events :next-seq next-seq})
+        (->Journal directory path blobs
+                   (atom {:events events
+                          :next-seq next-seq
+                          :ids (set (keep :event/id events))})
                    (Object.))))
     (catch clojure.lang.ExceptionInfo failure
       (throw failure))
@@ -202,31 +151,34 @@
 (defn append! [^Journal journal event]
   (locking (:lock journal)
     (try
-      (let [seq-number (inc (:next-seq @(:state journal)))
-            event (-> event
-                      without-secrets
-                      (assoc :event/id (or (:event/id event) (str (UUID/randomUUID)))
-                             :event/seq seq-number
-                             :event/time (or (:event/time event) (str (Instant/now)))))
-            stored-event (externalize (:blobs journal) event)
-            record {:journal/version 1
-                    :journal/event stored-event
-                    :journal/checksum
-                    (coordinates/digest :bbagent/journal-event stored-event)}
-            bytes (.getBytes (str (pr-str record) "\n") StandardCharsets/UTF_8)]
-        (with-open [channel (java.nio.channels.FileChannel/open
-                             (:path journal)
-                             (into-array OpenOption
-                                         [StandardOpenOption/CREATE
-                                          StandardOpenOption/WRITE
-                                          StandardOpenOption/APPEND]))]
-          (let [buffer (ByteBuffer/wrap bytes)]
-            (while (.hasRemaining buffer) (.write channel buffer)))
-          (.force channel true))
-        (swap! (:state journal)
-               (fn [state] {:events (conj (:events state) event)
-                            :next-seq seq-number}))
-        event)
+      (let [state @(:state journal)
+            seq-number (inc (:next-seq state))
+            event (store/prepare-event (store/strip-secrets event) seq-number)]
+        (when (contains? (:ids state) (:event/id event))
+          (throw (errors/error :journal-storage-failure
+                               "Duplicate journal event ID"
+                               {:event/id (:event/id event)})))
+        (let [stored-event (store/externalize (blob-storer (:blobs journal))
+                                              event)
+              record {:journal/version 1
+                      :journal/event stored-event
+                      :journal/checksum
+                      (store/semantic-checksum stored-event)}
+              bytes (.getBytes (str (pr-str record) "\n") StandardCharsets/UTF_8)]
+          (with-open [channel (java.nio.channels.FileChannel/open
+                               (:path journal)
+                               (into-array OpenOption
+                                           [StandardOpenOption/CREATE
+                                            StandardOpenOption/WRITE
+                                            StandardOpenOption/APPEND]))]
+            (let [buffer (ByteBuffer/wrap bytes)]
+              (while (.hasRemaining buffer) (.write channel buffer)))
+            (.force channel true))
+          (swap! (:state journal)
+                 (fn [state] {:events (conj (:events state) event)
+                              :next-seq seq-number
+                              :ids (conj (:ids state) (:event/id event))}))
+          event))
       (catch Throwable failure
         (if (= :journal-storage-failure (:bbagent/error (ex-data failure)))
           (throw failure)
@@ -248,3 +200,109 @@
              (map #(str (.getFileName ^Path %)))
              sort
              vec)))))
+
+(defn- blob-directory! [root session-id]
+  (let [blobs (.resolve (session-path root session-id) "blobs")]
+    (Files/createDirectories blobs (make-array java.nio.file.attribute.FileAttribute 0))
+    blobs))
+
+(defn- session-handle [root ^ConcurrentHashMap cache session-id]
+  (let [session-id (safe-session-id! session-id)]
+    (or (.get cache session-id)
+        (let [journal (open! root session-id)]
+          (or (.putIfAbsent cache session-id journal) journal)))))
+
+(defn- stored-event-ids [root]
+  (into #{}
+        (mapcat (fn [session-id]
+                  (keep :event/id (read-events root session-id))))
+        (list-sessions root)))
+
+(defn- logical-session-ids [root]
+  (->> (list-sessions root)
+       (filter #(seq (read-events root %)))
+       vec))
+
+(defrecord FileStore [root ^ConcurrentHashMap cache lock ids]
+  store/EventStore
+  (append-event! [_ session-id event]
+    (locking lock
+      (when-not (keyword? (:event/type event))
+        (throw (errors/error :journal-storage-failure
+                             "Store event requires :event/type")))
+      (let [prepared (dissoc (store/prepare-event event 0) :event/seq)]
+        (when (contains? @ids (:event/id prepared))
+          (throw (errors/error :journal-storage-failure
+                               "Duplicate journal event ID"
+                               {:event/id (:event/id prepared)})))
+        (let [stored (append! (session-handle root cache session-id) prepared)]
+          (swap! ids conj (:event/id stored))
+          stored))))
+  (events [_ session-id]
+    (locking lock (read-events root session-id)))
+  (validate-session! [_ session-id]
+    (locking lock (count (read-events root session-id))))
+  (events-after [_ session-id event-id]
+    (locking lock
+      (let [scanned (read-events root session-id)
+            index (first (keep-indexed
+                          (fn [index event]
+                            (when (= event-id (:event/id event)) index))
+                          scanned))]
+        (when (nil? index)
+          (throw (errors/error :journal-storage-failure "Unknown event ID"
+                               {:event/id event-id})))
+        (subvec scanned (inc index)))))
+  (first-event [_ session-id event-type]
+    (locking lock
+      (first (filter #(= event-type (:event/type %))
+                     (read-events root session-id)))))
+  (latest-checkpoint [_ session-id]
+    (locking lock
+      (last (filter #(= :session/checkpoint (:event/type %))
+                    (read-events root session-id)))))
+  (request-event [_ session-id request-id]
+    (locking lock
+      (first (filter #(and (= :repl/request (:event/type %))
+                           (= request-id (:request/id %)))
+                     (read-events root session-id)))))
+  (list-sessions [_]
+    (locking lock (logical-session-ids root)))
+  store/ObjectStore
+  (put-object! [_ session-id value]
+    (locking lock
+      (when-not (string? value)
+        (throw (errors/error :journal-storage-failure
+                             "Store objects must be strings")))
+      (store/store-string (blob-storer (blob-directory! root session-id))
+                          value)))
+  (get-object [_ session-id digest]
+    (locking lock
+      (safe-session-id! session-id)
+      (let [hex (store/blob-hex digest)
+            session-ids (cons session-id (remove #{session-id}
+                                                  (list-sessions root)))
+            ^String content
+            (when (and hex (re-matches #"[0-9a-f]{64}" hex))
+              (some (fn [candidate]
+                      ((blob-loader (.resolve (session-path root candidate) "blobs"))
+                       hex))
+                    session-ids))]
+      (when (nil? content)
+        (throw (errors/error :session-recovery-failure
+                             "Store object is missing or malformed"
+                             {:blob/digest digest})))
+      (when-not (= hex (coordinates/sha-256 content))
+        (throw (errors/error :session-recovery-failure
+                             "Store object integrity check failed"
+                             {:blob/digest digest})))
+        content)))
+  store/StoreLifecycle
+  (close-store! [_] nil))
+
+(defn file-store
+  "Opens the root-level file-backed store.  Session journal handles are
+    cached; close-store! is an idempotent no-op."
+  [root]
+  (->FileStore (str root) (ConcurrentHashMap.) (Object.)
+               (atom (stored-event-ids root))))

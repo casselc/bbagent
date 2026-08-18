@@ -1,9 +1,11 @@
 (ns bbagent.core
   (:require [bbagent.agent :as agent]
-            [bbagent.journal :as journal]
             [bbagent.provider :as provider]
+            [bbagent.s0b-smoke :as s0b-smoke]
             [bbagent.session :as session]
             [bbagent.sqlite :as sqlite]
+            [bbagent.storage :as storage]
+            [bbagent.store :as store]
             [clojure.java.io :as io]
             [clojure.string :as str])
   (:gen-class))
@@ -83,25 +85,39 @@
         (session/start! {:state-root (state-root options)
                          :project-root (or (:project options) ".")
                          :model-provider (model-provider options nil)
-                         :system-prompt (system-prompt options)})]
+                         :system-prompt (system-prompt options)
+                         :store-backend (:store options)})]
     (try (interactive! agent-session)
          (finally (session/close! agent-session :operator-exit)))))
 
 (defn- resume-command [session-id options]
-  (let [events (journal/read-events (state-root options) session-id)
-        start (first (filter #(= :session/started (:event/type %)) events))
+  (let [root-store (storage/open! (state-root options) (:store options))
+        start (try
+                (store/first-event root-store session-id :session/started)
+                (finally (store/close-store! root-store)))
         fallback (:provider/config start)
         agent-session
         (session/resume! {:state-root (state-root options)
                           :session-id session-id
                           :model-provider (model-provider options fallback)
-                          :system-prompt (system-prompt options)})]
+                          :system-prompt (system-prompt options)
+                          :store-backend (:store options)})]
     (try (interactive! agent-session)
          (finally (session/close! agent-session :operator-exit)))))
 
+(defn- sessions-command [options]
+  (let [root-store (storage/open! (state-root options) (:store options))]
+    (try
+      (doseq [session-id (store/list-sessions root-store)]
+        (println session-id))
+      (finally (store/close-store! root-store)))))
+
 (defn- inspect-command [session-id options]
-  (doseq [event (journal/read-events (state-root options) session-id)]
-    (prn event)))
+  (let [root-store (storage/open! (state-root options) (:store options))]
+    (try
+      (doseq [event (store/events root-store session-id)]
+        (prn event))
+      (finally (store/close-store! root-store)))))
 
 (defn- sqlite-smoke-command [options]
   (let [unknown (seq (remove #{:arguments :database :project} (keys options)))]
@@ -114,16 +130,57 @@
     (when-not (:project options)
       (throw (ex-info "SQLite smoke requires --project PATH" {})))
     (prn (sqlite/smoke! {:database (:database options)
-                         :project-root (:project options)}))))
+                          :project-root (:project options)}))))
+
+(defn- s0b-smoke-command [options]
+  (let [unknown (seq (remove #{:arguments :phase :project :session :state}
+                             (keys options)))
+        phase (:phase options)]
+    (when unknown
+      (throw (ex-info "Unknown S0b smoke options" {:options (vec unknown)})))
+    (when (seq (:arguments options))
+      (throw (ex-info "S0b smoke does not accept positional arguments" {})))
+    (when-not (:state options)
+      (throw (ex-info "S0b smoke requires --state PATH" {})))
+    (when-not (:session options)
+      (throw (ex-info "S0b smoke requires --session ID" {})))
+    (case phase
+      "create" (do
+                 (when-not (:project options)
+                   (throw (ex-info "S0b create requires --project PATH" {})))
+                 (prn (s0b-smoke/create! {:state-root (:state options)
+                                          :project-root (:project options)
+                                          :session-id (:session options)})))
+      "resume" (prn (s0b-smoke/resume! {:state-root (:state options)
+                                         :session-id (:session options)}))
+      "ambiguous-exit"
+      (do
+        (when-not (:project options)
+          (throw (ex-info "S0b ambiguous exit requires --project PATH" {})))
+        (s0b-smoke/ambiguous-exit! {:state-root (:state options)
+                                    :project-root (:project options)
+                                    :session-id (:session options)}))
+      "ambiguous-check"
+      (prn (s0b-smoke/ambiguous-check! {:state-root (:state options)
+                                        :session-id (:session options)}))
+      "transaction-exit"
+      (s0b-smoke/transaction-exit! {:state-root (:state options)
+                                    :session-id (:session options)})
+      "transaction-check"
+      (prn (s0b-smoke/transaction-check! {:state-root (:state options)
+                                          :session-id (:session options)}))
+      (throw (ex-info "S0b smoke requires a known --phase" {:phase phase})))))
 
 (defn- usage []
-  (str "bbagent run [--project PATH] [provider options]\n"
-       "bbagent resume SESSION_ID [provider options]\n"
-       "bbagent sessions [--state PATH]\n"
-       "bbagent inspect SESSION_ID [--state PATH]\n"
-       "bbagent s0a-sqlite-smoke --database PATH --project PATH\n"
+  (str "bbagent run [--project PATH] [--store file|sqlite] [provider options]\n"
+       "bbagent resume SESSION_ID [--store file|sqlite] [provider options]\n"
+       "bbagent sessions [--state PATH] [--store file|sqlite]\n"
+        "bbagent inspect SESSION_ID [--state PATH] [--store file|sqlite]\n"
+        "bbagent s0a-sqlite-smoke --database PATH --project PATH\n"
+        "bbagent s0b-native-smoke --phase PHASE --state PATH --session ID [--project PATH]\n"
        "provider options: --endpoint URL --model ID [--reasoning-effort VALUE]\n"
-       "                  [--allow-insecure-http true]\n"))
+       "                  [--allow-insecure-http true]\n"
+       "--store selects the durable backend and defaults to file\n"))
 
 (defn -main [& args]
   (let [[command & command-args] args
@@ -134,13 +191,13 @@
       "resume" (if-let [session-id (first positional)]
                  (resume-command session-id options)
                  (throw (ex-info "resume requires a session ID" {})))
-      "sessions" (doseq [session-id (journal/list-sessions (state-root options))]
-                   (println session-id))
+      "sessions" (sessions-command options)
       "inspect" (if-let [session-id (first positional)]
                    (inspect-command session-id options)
                    (throw (ex-info "inspect requires a session ID" {})))
       "s0a-sqlite-smoke" (sqlite-smoke-command options)
+      "s0b-native-smoke" (s0b-smoke-command options)
       "describe" (prn {:application :bbagent
-                         :scope :a0
+                         :scope :s0b
                          :surface :persistent-sci})
       (print (usage)))))

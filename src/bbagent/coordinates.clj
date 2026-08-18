@@ -50,10 +50,12 @@
 (defn canonical-string [value]
   (canonical-pr-str (canonical-tree value)))
 
-(defn sha-256 [^String value]
-  (let [bytes (.digest (MessageDigest/getInstance "SHA-256")
-                       (.getBytes value StandardCharsets/UTF_8))]
+(defn sha-256-bytes [^bytes value]
+  (let [bytes (.digest (MessageDigest/getInstance "SHA-256") value)]
     (apply str (map #(format "%02x" (bit-and (int %) 0xff)) bytes))))
+
+(defn sha-256 [^String value]
+  (sha-256-bytes (.getBytes value StandardCharsets/UTF_8)))
 
 (defn digest [kind value]
   (when-not (qualified-keyword? kind)

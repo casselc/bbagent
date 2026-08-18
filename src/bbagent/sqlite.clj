@@ -146,7 +146,19 @@
      (str "(next.jdbc/get-datasource " (pr-str jdbc-url) ")")
      "bbagent.sqlite/require" "(require '[bbagent.sqlite :as sqlite])"
      "bbagent.sqlite/database-smoke!"
-     (str "(bbagent.sqlite/database-smoke! " (pr-str (str forbidden)) ")")}))
+     (str "(bbagent.sqlite/database-smoke! " (pr-str (str forbidden)) ")")
+     "bbagent.store/require" "(require '[bbagent.store :as store])"
+     "bbagent.storage/require" "(require '[bbagent.storage :as storage])"
+     "bbagent.sqlite-store/require"
+     "(require '[bbagent.sqlite-store :as sqlite-store])"
+     "bbagent.storage/open!"
+     (str "(bbagent.storage/open! " (pr-str (str forbidden)) " :sqlite)")
+     "bbagent.sqlite-store/sqlite-store"
+     (str "(bbagent.sqlite-store/sqlite-store " (pr-str (str forbidden)) ")")
+     "bbagent.s0b-smoke/require" "(require '[bbagent.s0b-smoke :as smoke])"
+     "bbagent.s0b-smoke/transaction-check!"
+     (str "(bbagent.s0b-smoke/transaction-check! {:state-root "
+          (pr-str (str forbidden)) " :session-id \"forbidden\"})")}))
 
 (defn authority-smoke!
   "Proves the actual A0 Context remains unchanged despite trusted SQLite reachability."
