@@ -3,12 +3,12 @@
 ## 1. Verdict
 
 **Revise.** The JVM application/runtime boundary, bounded persistent context,
-deterministic fake-provider loop, durable journal, and restart recovery pass. A0 is
-not a final pass because the native application artifact and one live provider
-dogfood run could not be executed in the available environment.
+deterministic fake-provider loop, durable journal, restart recovery, pinned native
+build, and native session/context smoke path pass. A0 is not a final pass because one
+live provider dogfood run has not been executed.
 
-The remaining work is evidence, source publication, and any fixes that evidence
-reveals. It is not a reason to broaden A0 or begin A1.
+The remaining work is live-provider evidence and any fixes that evidence reveals. It
+is not a reason to broaden A0 or begin A1.
 
 ## 2. Trusted Application Integration
 
@@ -37,6 +37,8 @@ bb4t A0 build hook: 896af34a7933a80f9fec16995d7a477354b49649
 bbagent A0 implementation: 39703745fd48fd462b01bce088336779687a09a0
 development embedded bb4t value: development
 development embedded bbagent value: development
+native embedded bb4t value: 896af34a7933a80f9fec16995d7a477354b49649
+native embedded bbagent value: 39703745fd48fd462b01bce088336779687a09a0
 ```
 
 The native wrapper pins the exact bb4t hook and bbagent implementation commits. It
@@ -212,12 +214,40 @@ does not change a digest and meaningful profile/grant changes do.
 
 ## 9. Native Status
 
-Not proven. The source integration hook and strict pinned build wrapper exist, but
-this environment has neither `lein` nor `GRAALVM_HOME/bin/native-image`. Exact bb4t
-and bbagent source coordinates are pinned, but no native build result is claimed.
+The pinned native application build passed. `script/build-native` fetched and
+verified the exact bb4t and bbagent implementation commits, selected `bbagent.core`
+as the image main class, embedded both source coordinates, and produced a runnable
+executable.
 
-No native artifact, size delta, startup measurement, or JVM/native parity claim is
-made for A0.
+```text
+Leiningen              2.11.2
+Java                   25.0.4+7-LTS
+GraalVM distribution   Oracle GraalVM 25.2.4+7.1
+native-image           25.0.4
+native-image phase     33.1 s
+binary bytes           50,989,312
+binary SHA-256         5931cf9f38c2396c96fa36ed343e5a683c5e407e9d41318b7ef5ac095c8c5f3c
+```
+
+This differs from the BB1 evidence toolchain's recorded Leiningen 2.9.8 and GraalVM
+label, so no bit-for-bit comparison or BB1 measurement reproduction is claimed.
+
+The native executable passed `describe`, created a session, constructed the real
+BB1 runtime and `:agent/project-read` Context, checkpointed, exited, listed the
+session, and inspected all six durable events. The native session recorded:
+
+```text
+session                 5583b59e-d023-4983-a055-50d9cbc189c1
+runtime digest          sha256:cad47c1f697fe70b2aea92d6babedd8e4fc6ba06d05b14d0310aafdd331a8e6d
+catalog digest          sha256:f132b513c4492e9cc9e22af088182d03d28b2059eab5c182dcbdf1db6e425f31
+context-spec digest     sha256:56afcaaf18ea2ef16dbdf684bced9f45be2e93dc4a30e774ddab2f6f01297937
+effective digest        sha256:76a3538628f68f85c212390698737c08deb9ce1e464fc07f666a7e7bf2308692
+```
+
+A dummy provider identity was configured, but `/quit` occurred before any model
+request. The dummy key was absent from the persisted journal. The full deterministic
+suite still runs on the JVM; native build/start/context/journal behavior is proven,
+not complete JVM/native test-suite parity.
 
 ## 10. Dogfood Result
 
@@ -230,6 +260,10 @@ exit -> new AgentSession -> replay -> next turn uses retained definition
 
 Tests also pass for failed-form partial state, post-checkpoint durable result folding,
 large payload blobs, provider errors/malformed actions, and authority negatives.
+
+The native no-model smoke path also passed runtime/context construction, durable
+checkpoint/end events, session listing, event inspection, exact coordinate embedding,
+and credential omission.
 
 A real model run was not performed because `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and
 `OPENAI_MODEL` are all unset. No statement about live endpoint compatibility or model
@@ -256,16 +290,15 @@ Deterministic JVM result:
 - no model routing or second production provider;
 - no hidden chain-of-thought persistence;
 - no transactional multi-process journal writer;
-- no native-image result;
+- no complete JVM/native deterministic-suite parity result;
 - no live provider dogfood result;
 - no Cedar or other policy engine;
 - no claim that Git identifies all project content when the tree is dirty.
 
 ## 12. Recommendation for A1
 
-Do not begin A1 yet. First run the pinned native build, execute the deterministic
-suite against the native application where applicable, and perform one bounded
-live-provider project-reading/resume session.
+Do not begin A1 yet. First perform one bounded live-provider project-reading/resume
+session against the pinned native application.
 
 If those checks do not reveal an authority or recovery defect, the application seams
 are sufficiently clean for A1: CLI code is thin, the future TUI can remain a client of
