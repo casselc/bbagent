@@ -5,7 +5,7 @@ set -euo pipefail
 BB4T_REPOSITORY=${BB4T_REPOSITORY:-https://github.com/casselc/babashka.git}
 BBAGENT_REPOSITORY=${BBAGENT_REPOSITORY:-https://github.com/casselc/bbagent.git}
 BB4T_COMMIT=${BB4T_COMMIT:-f438307280b7a01fd20e99f54cd82682ef15d12a}
-BBAGENT_COMMIT=${BBAGENT_COMMIT:-45a63073ad02646bb99b2eb9d182060c7473b432}
+BBAGENT_COMMIT=${BBAGENT_COMMIT:-0b44dd0d2bb4f01f0cb1aeec5052bdab8b98c1c9}
 SQLITE_SIDECAR_SHA256=f374da845a36d0a663521457f8e454413325e3b8247a15c2677426f4b15cf6ac
 NEXT_JDBC_LICENSE_SHA256=9de5ceada4e5d000784566d4e8f95581984c7287e8b3d55e41639c9ec38ea2db
 SCRIPT_ROOT=$(git -C "$(dirname "$0")/.." rev-parse --show-toplevel)
@@ -18,7 +18,7 @@ then
   exit 1
 fi
 
-BUILD_ROOT=${BBAGENT_BUILD_ROOT:-"${TMPDIR:-/tmp}/bbagent-s0a"}
+BUILD_ROOT=${BBAGENT_BUILD_ROOT:-"${TMPDIR:-/tmp}/bbagent-s0b"}
 if [ -e "$BUILD_ROOT" ]
 then
   echo "Build root already exists: $BUILD_ROOT" >&2
@@ -49,8 +49,10 @@ printf '%s\n' "$BBAGENT_RESOLVED" \
   > "$BUILD_ROOT/bbagent/resources/META-INF/bbagent/commit"
 
 pushd "$BUILD_ROOT/bb4t" >/dev/null
-BB4T_APPLICATION=bbagent BABASHKA_BINARY=bbagent script/uberjar
-BB4T_APPLICATION=bbagent BABASHKA_BINARY=bbagent \
+BABASHKA_FEATURE_JDBC=false BABASHKA_FEATURE_SQLITE=false \
+  BB4T_APPLICATION=bbagent BABASHKA_BINARY=bbagent script/uberjar
+BABASHKA_FEATURE_JDBC=false BABASHKA_FEATURE_SQLITE=false \
+  BB4T_APPLICATION=bbagent BABASHKA_BINARY=bbagent \
   script/compile "-Dorg.sqlite.lib.exportPath=$DIST_DIR"
 popd >/dev/null
 
@@ -109,6 +111,94 @@ TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" s0a-sqlite-smoke \
   --project "$SMOKE_PROJECT" > "$BUILD_ROOT/relocated-smoke.edn"
 popd >/dev/null
 
+S0B_PROJECT="$BUILD_ROOT/s0b-project"
+S0B_STATE="$BUILD_ROOT/s0b-state"
+S0B_AMBIGUOUS_STATE="$BUILD_ROOT/s0b-ambiguous-state"
+S0B_TRANSACTION_STATE="$BUILD_ROOT/s0b-transaction-state"
+mkdir "$S0B_PROJECT"
+dd if=/dev/zero bs=70000 count=1 2>/dev/null | tr '\0' 'x' \
+  > "$S0B_PROJECT/README.md"
+
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" s0b-native-smoke \
+  --phase create --state "$S0B_STATE" --session s0b-native-main \
+  --project "$S0B_PROJECT" > "$BUILD_ROOT/s0b-create.edn"
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" s0b-native-smoke \
+  --phase resume --state "$S0B_STATE" --session s0b-native-main \
+  > "$BUILD_ROOT/s0b-resume.edn"
+if ! grep -Fq ':object/required? true' "$BUILD_ROOT/s0b-create.edn" || \
+   ! grep -Fq ':object/verified? true' "$BUILD_ROOT/s0b-create.edn" || \
+   ! grep -Fq ':object/verified? true' "$BUILD_ROOT/s0b-resume.edn" || \
+   ! grep -Fq ':data 70000' "$BUILD_ROOT/s0b-resume.edn"
+then
+  echo "S0b native CAS or replay evidence is incomplete" >&2
+  exit 1
+fi
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" sessions \
+  --state "$S0B_STATE" --store sqlite > "$BUILD_ROOT/s0b-sessions.txt"
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" inspect s0b-native-main \
+  --state "$S0B_STATE" --store sqlite > "$BUILD_ROOT/s0b-inspect.edn"
+if ! grep -Fxq 's0b-native-main' "$BUILD_ROOT/s0b-sessions.txt"
+then
+  echo "S0b native session listing did not find the durable session" >&2
+  exit 1
+fi
+
+set +e
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" s0b-native-smoke \
+  --phase ambiguous-exit --state "$S0B_AMBIGUOUS_STATE" \
+  --session s0b-native-ambiguous --project "$S0B_PROJECT" \
+  > "$BUILD_ROOT/s0b-ambiguous-exit.edn" 2> "$BUILD_ROOT/s0b-ambiguous-exit.err"
+S0B_AMBIGUOUS_EXIT=$?
+set -e
+if [ "$S0B_AMBIGUOUS_EXIT" -ne 73 ]
+then
+  echo "Ambiguous-effect native probe did not halt after durable intent" >&2
+  exit 1
+fi
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" s0b-native-smoke \
+  --phase ambiguous-check --state "$S0B_AMBIGUOUS_STATE" \
+  --session s0b-native-ambiguous > "$BUILD_ROOT/s0b-ambiguous-check.edn"
+if ! grep -Fq ':recovery/status :failed-closed' "$BUILD_ROOT/s0b-ambiguous-check.edn" || \
+   ! grep -Fq ':error/category :session-recovery-failure' \
+      "$BUILD_ROOT/s0b-ambiguous-check.edn"
+then
+  echo "Ambiguous-effect native recovery did not fail closed" >&2
+  exit 1
+fi
+
+set +e
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" s0b-native-smoke \
+  --phase transaction-exit --state "$S0B_TRANSACTION_STATE" \
+  --session s0b-native-transaction > "$BUILD_ROOT/s0b-transaction-exit.edn" \
+  2> "$BUILD_ROOT/s0b-transaction-exit.err"
+S0B_TRANSACTION_EXIT=$?
+set -e
+if [ "$S0B_TRANSACTION_EXIT" -ne 74 ]
+then
+  echo "Uncommitted-transaction native probe did not halt at its cut" >&2
+  exit 1
+fi
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" s0b-native-smoke \
+  --phase transaction-check --state "$S0B_TRANSACTION_STATE" \
+  --session s0b-native-transaction > "$BUILD_ROOT/s0b-transaction-check.edn"
+if ! grep -Fq ':event/count 1' "$BUILD_ROOT/s0b-transaction-check.edn" || \
+   ! grep -Fq ':uncommitted-object/visible? false' \
+      "$BUILD_ROOT/s0b-transaction-check.edn"
+then
+  echo "Uncommitted SQLite transaction became visible after hard exit" >&2
+  exit 1
+fi
+
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" s0a-sqlite-smoke \
+  --database "$BUILD_ROOT/s0b-authority.db" --project "$S0B_PROJECT" \
+  > "$BUILD_ROOT/s0b-authority.edn"
+if ! grep -Fq 'bbagent.storage/open!' "$BUILD_ROOT/s0b-authority.edn" || \
+   ! grep -Fq ':forbidden-database/created? false' "$BUILD_ROOT/s0b-authority.edn"
+then
+  echo "S0b native authority evidence is incomplete" >&2
+  exit 1
+fi
+
 shopt -s nullglob dotglob
 runtime_tmp_entries=("$RUNTIME_TMP"/*)
 shopt -u nullglob dotglob
@@ -140,9 +230,18 @@ fi
   printf 'sqlite_jdbc=org.xerial:sqlite-jdbc:3.53.2.1\n'
   printf 'next_jdbc=com.github.seancorfield:next.jdbc:1.3.1118\n'
   printf 'missing_sidecar_exit=%s\n' "$MISSING_SIDECAR_EXIT"
+  printf 's0b_ambiguous_exit=%s\n' "$S0B_AMBIGUOUS_EXIT"
+  printf 's0b_transaction_exit=%s\n' "$S0B_TRANSACTION_EXIT"
   sha256sum "$DIST_DIR/bbagent" "$DIST_DIR/libsqlitejdbc.so" \
     "$DIST_DIR/THIRD_PARTY_NOTICES.md" "$BUILD_ROOT/native-smoke.edn" \
     "$BUILD_ROOT/native-smoke.db" "$BUILD_ROOT/relocated-smoke.edn" \
+    "$BUILD_ROOT/s0b-create.edn" "$BUILD_ROOT/s0b-resume.edn" \
+    "$BUILD_ROOT/s0b-sessions.txt" "$BUILD_ROOT/s0b-inspect.edn" \
+    "$BUILD_ROOT/s0b-ambiguous-exit.edn" \
+    "$BUILD_ROOT/s0b-ambiguous-check.edn" \
+    "$BUILD_ROOT/s0b-transaction-exit.edn" \
+    "$BUILD_ROOT/s0b-transaction-check.edn" \
+    "$BUILD_ROOT/s0b-authority.edn" "$S0B_STATE/bbagent.sqlite3" \
     "$DIST_DIR/licenses/"*
   stat --format='%n %s bytes mode=%a' "$DIST_DIR/bbagent" \
     "$DIST_DIR/libsqlitejdbc.so" "$DIST_DIR/THIRD_PARTY_NOTICES.md" \
