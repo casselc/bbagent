@@ -26,11 +26,9 @@
 
 (defn session-path [root session-id]
   (safe-session-id! session-id)
-  (let [^Path sessions (-> (Paths/get (str root) (make-array String 0))
-                           .toAbsolutePath
-                           .normalize
-                           (.resolve "sessions")
-                           .normalize)
+  (let [^Path root-path (Paths/get (str root) (make-array String 0))
+        ^Path absolute-root (.normalize (.toAbsolutePath root-path))
+        ^Path sessions (.normalize (.resolve absolute-root "sessions"))
         ^Path candidate (.normalize (.resolve sessions session-id))]
     (when-not (= sessions (.getParent candidate))
       (throw (errors/error :journal-storage-failure
