@@ -64,6 +64,10 @@
         run-id (:run-id agent-session)]
     (try
       (let [answer (agent/turn! agent-session "Read and retain the fixture.")]
+        (store/append-event! (:store agent-session) session-id
+                             {:event/type :s0b/native-object
+                              :object/content
+                              (slurp (io/file project-root "README.md"))})
         (session/close! agent-session :s0b-native-create)
         (evidence state-root session-id run-id answer))
       (catch Throwable failure
