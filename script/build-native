@@ -128,7 +128,7 @@ TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" s0b-native-smoke \
 if ! grep -Fq ':object/required? true' "$BUILD_ROOT/s0b-create.edn" || \
    ! grep -Fq ':object/verified? true' "$BUILD_ROOT/s0b-create.edn" || \
    ! grep -Fq ':object/verified? true' "$BUILD_ROOT/s0b-resume.edn" || \
-   ! grep -Fq ':data 70000' "$BUILD_ROOT/s0b-resume.edn"
+   ! grep -Fq ':value/data 70000' "$BUILD_ROOT/s0b-resume.edn"
 then
   echo "S0b native CAS or replay evidence is incomplete" >&2
   exit 1
