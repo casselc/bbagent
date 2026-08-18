@@ -1,0 +1,105 @@
+{:s0b/evidence-version 1
+ :recorded-at "2026-08-18"
+ :build-root "/tmp/opencode/bbagent-s0b-20260818c"
+ :coordinates
+ {:builder/commit "852494260e5540001ed3a723deb94ee3265e8c1f"
+  :bbagent/implementation "ad6c58549870684e397b46f12e7e96870ca977a6"
+  :measurement/commit "0b44dd0d2bb4f01f0cb1aeec5052bdab8b98c1c9"
+  :test-run/commit "852494260e5540001ed3a723deb94ee3265e8c1f"
+  :bb4t/commit "f438307280b7a01fd20e99f54cd82682ef15d12a"
+  :next.jdbc "com.github.seancorfield/next.jdbc:1.3.1118"
+  :sqlite-jdbc "org.xerial/sqlite-jdbc:3.53.2.1"
+  :sqlite "3.53.2"}
+ :schema
+ {:user-version 1
+  :database-name "bbagent.sqlite3"
+  :tables [:event :object]
+  :checkpoint-table? false}
+ :sqlite-policy
+ {:journal-mode :wal
+  :synchronous :full
+  :foreign-keys true
+  :busy-timeout-ms 5000}
+ :tests
+ {:command "clojure -M:test"
+  :tests 55 :assertions 408 :failures 0 :errors 0
+  :log/sha256 "ede61edf3ad22cb163dc36928aff03805e0e85615c23bf13418cb415db955aba"}
+ :build
+ {:native-image-seconds 41.5
+  :wrapper-wall-seconds 251.82
+  :maximum-rss-kb 3973436
+  :warnings 22
+  :log/sha256 "7eebff204871b23ad15723ee9f7c5ff92ba5eb74ec1fcd30a8c14d6488ed4a81"}
+ :artifacts
+ {:executable
+  {:bytes 65014016
+   :sha256 "8c606778779c3b501f9c406ffb7c831dc4bbec3a5a8c14c8a805b88ee5989b3f"
+   :mode "0755"}
+  :sqlite-sidecar
+  {:bytes 1093888
+   :sha256 "f374da845a36d0a663521457f8e454413325e3b8247a15c2677426f4b15cf6ac"
+   :mode "0755"}
+  :complete-distribution-bytes 66137201}
+ :native-session
+ {:session/id "s0b-native-main"
+  :create
+  {:run/id "6539b195-e66a-4ea0-8385-0dd34a325121"
+   :events 28
+   :last-seq 28
+   :object-required? true
+   :object-verified? true
+   :object/digest "sha256:bca09f4a757d5571c7d9f3341d4301f3c391c090826acc1a3013c6bcb7c01722"
+   :output/sha256 "8305c852a2689781311eb32dcaeb58475e7f23d4b150e4627062a8bf2f708844"}
+  :resume
+  {:run/id "e2910471-ccf0-4f3e-b647-ae1d618bf8c1"
+   :events 49
+   :last-seq 49
+   :reconstructed-value 70000
+   :object-verified? true
+   :output/sha256 "9827f4d69aeb4a0aef0bbd717b5b6ba654bfed5cbf7184ce729274aab9e52756"}
+  :database
+  {:bytes 200704
+   :sha256 "9d54c072b47ba465844857072607aea3058965398544c1b710e220c0f4134414"}
+  :listed? true
+  :inspected-events 49
+  :inspect/output-sha256 "2d6d8c34aac5ba923b7ef478ff2b7363977def7f632c6a3dd68193fddffc8d20"}
+ :failure-probes
+ {:ambiguous-effect
+  {:hard-exit 73
+   :recovery-status :failed-closed
+   :error/category :session-recovery-failure
+   :output/sha256 "b6a17e84c70af9a70f428f0c721ced95b7b80fea1d9b4c2b5874c0a48ddd340a"}
+  :uncommitted-transaction
+  {:hard-exit 74
+   :baseline-events 1
+   :uncommitted-object-visible? false
+   :output/sha256 "f129bdff5113785fdd38d204e7e1a6c7a87d18096e4bfde00c56af7978e86fd0"}
+  :missing-sidecar {:exit 1 :database-created? false}
+  :runtime-temp-entry-count 0}
+ :authority
+ {:positive-probes 4
+  :negative-probes 18
+  :negative-status :error
+  :negative-category :bb4t-evaluation-failure
+  :projected-class-count 0
+  :supplied-import-count 0
+  :forbidden-database-created? false
+  :output/sha256 "ff1378c42484107b9bf4b46b35f0bda8d2e9f396794f4d116a86bb39057c1f5d"}
+ :native-startup
+ {:method {:warmups 5 :samples 30 :command "bbagent describe"}
+  :s0a {:median-ns 5176555 :p95-ns 5565426 :mean-ns 5123863
+        :log/sha256 "8d1fe855865cce563e1315a12862ef59124f369afdf322deac296bc05aecefdb"}
+  :s0b {:median-ns 5048694 :p95-ns 5637176 :mean-ns 4857606
+        :log/sha256 "ddff8ba8b9243ee59336660065ca4f99a1264faf03fe4a02c6fc87bd68e8818c"}}
+ :measurements "artifacts/s0b-measurements.edn"
+ :retained-logs
+ {:build "/tmp/opencode/bbagent-s0b-build-c.log"
+  :tests "/tmp/opencode/bbagent-s0b-20260818c/jvm-tests.log"
+  :manifest "/tmp/opencode/bbagent-s0b-20260818c/build-evidence.txt"
+  :create "/tmp/opencode/bbagent-s0b-20260818c/s0b-create.edn"
+  :resume "/tmp/opencode/bbagent-s0b-20260818c/s0b-resume.edn"
+  :inspect "/tmp/opencode/bbagent-s0b-20260818c/s0b-inspect.edn"
+  :authority "/tmp/opencode/bbagent-s0b-20260818c/s0b-authority.edn"
+  :post-build-measurements
+  {:path "/tmp/opencode/bbagent-s0b-20260818c/post-build-measurements.txt"
+   :sha256 "8956fc2abdf6e14a023deb878e45076d2b34a8c43e78388dd6d47ae00417c91f"}}}

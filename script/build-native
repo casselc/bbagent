@@ -245,7 +245,10 @@ fi
     "$DIST_DIR/licenses/"*
   stat --format='%n %s bytes mode=%a' "$DIST_DIR/bbagent" \
     "$DIST_DIR/libsqlitejdbc.so" "$DIST_DIR/THIRD_PARTY_NOTICES.md" \
-    "$DIST_DIR/licenses/"*
+    "$DIST_DIR/licenses/"* "$S0B_STATE/bbagent.sqlite3" \
+    "$BUILD_ROOT/s0b-inspect.edn"
+  du --bytes --summarize "$DIST_DIR"
+  wc -l "$BUILD_ROOT/s0b-inspect.edn"
 } > "$BUILD_ROOT/build-evidence.txt"
 
 printf 'Built %s with %s from bb4t %s and bbagent %s\n' \

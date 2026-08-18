@@ -1,0 +1,66 @@
+{:evidence/version 1
+ :recorded-at "2026-08-18T21:37:20.250635197Z"
+ :source {:implementation-commit "0b44dd0d2bb4f01f0cb1aeec5052bdab8b98c1c9"
+          :native-proof-commit "ad6c58549870684e397b46f12e7e96870ca977a6"}
+ :method {:command "clojure -M script/measure-s0b.clj"
+          :samples-per-size 1
+          :append-percentiles :within-session
+          :sizes [100 1000 10000]
+          :claim :local-engineering-measurement}
+ :backends
+ {:file
+  [{:events 100
+    :open-ns 794416
+    :append {:median-ns 248727 :p95-ns 783565 :total-ns 44172096}
+    :full-read-ns 22373261 :validate-ns 23208778
+    :latest-checkpoint-ns 27510904 :tail-events 10 :tail-read-ns 17214267
+    :reopen-ns 8716853 :resume-window-ns 20738770
+    :cas-put-ns 2721010 :cas-get-ns 3237802
+    :storage-bytes {:live 99801 :closed 99801}}
+   {:events 1000
+    :open-ns 57162
+    :append {:median-ns 97150 :p95-ns 129002 :total-ns 93564284}
+    :full-read-ns 77361173 :validate-ns 69868839
+    :latest-checkpoint-ns 66613452 :tail-events 10 :tail-read-ns 45620905
+    :reopen-ns 44557964 :resume-window-ns 127519988
+    :cas-put-ns 1019036 :cas-get-ns 1775287
+    :storage-bytes {:live 373503 :closed 373503}}
+   {:events 10000
+    :open-ns 59577
+    :append {:median-ns 41431 :p95-ns 46070 :total-ns 425528492}
+    :full-read-ns 417669882 :validate-ns 458597014
+    :latest-checkpoint-ns 416738317 :tail-events 10 :tail-read-ns 416240201
+    :reopen-ns 418765187 :resume-window-ns 1230318480
+    :cas-put-ns 865085 :cas-get-ns 495731
+    :storage-bytes {:live 3164505 :closed 3164505}}]
+  :sqlite
+  [{:events 100
+    :open-ns 99716491
+    :append {:median-ns 227104 :p95-ns 405034 :total-ns 26364367}
+    :full-read-ns 7880806 :validate-ns 6605548
+    :latest-checkpoint-ns 354404 :tail-events 10 :tail-read-ns 709239
+    :reopen-ns 667707 :resume-window-ns 5323016
+    :cas-put-ns 594856 :cas-get-ns 992194
+    :storage-bytes {:live 2339976 :closed 172032}}
+   {:events 1000
+    :open-ns 1095355
+    :append {:median-ns 113072 :p95-ns 153310 :total-ns 118699289}
+    :full-read-ns 39932945 :validate-ns 33218574
+    :latest-checkpoint-ns 351668 :tail-events 10 :tail-read-ns 545568
+    :reopen-ns 773235 :resume-window-ns 32447303
+    :cas-put-ns 275349 :cas-get-ns 137279
+    :storage-bytes {:live 4931136 :closed 864256}}
+   {:events 10000
+    :open-ns 978787
+    :append {:median-ns 90006 :p95-ns 107781 :total-ns 929247951}
+    :full-read-ns 331153505 :validate-ns 314008815
+    :latest-checkpoint-ns 297233 :tail-events 10 :tail-read-ns 473748
+    :reopen-ns 728567 :resume-window-ns 311383353
+    :cas-put-ns 238488 :cas-get-ns 135856
+    :storage-bytes {:live 11943632 :closed 7880704}}]}
+ :cumulative-checkpoints
+ {:method {:messages 1000 :checkpoint-every 100 :events 1010}
+  :file {:latest-checkpoint-ns 61799424 :validate-ns 56806104
+         :storage-bytes {:live 472768 :closed 472768}}
+  :sqlite {:latest-checkpoint-ns 6327052 :validate-ns 59311060
+           :storage-bytes {:live 5254672 :closed 1224704}}}}
