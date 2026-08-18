@@ -3,6 +3,7 @@
             [bbagent.journal :as journal]
             [bbagent.provider :as provider]
             [bbagent.session :as session]
+            [bbagent.sqlite :as sqlite]
             [clojure.java.io :as io]
             [clojure.string :as str])
   (:gen-class))
@@ -102,11 +103,25 @@
   (doseq [event (journal/read-events (state-root options) session-id)]
     (prn event)))
 
+(defn- sqlite-smoke-command [options]
+  (let [unknown (seq (remove #{:arguments :database :project} (keys options)))]
+    (when unknown
+      (throw (ex-info "Unknown SQLite smoke options" {:options (vec unknown)})))
+    (when (seq (:arguments options))
+      (throw (ex-info "SQLite smoke does not accept positional arguments" {})))
+    (when-not (:database options)
+      (throw (ex-info "SQLite smoke requires --database PATH" {})))
+    (when-not (:project options)
+      (throw (ex-info "SQLite smoke requires --project PATH" {})))
+    (prn (sqlite/smoke! {:database (:database options)
+                         :project-root (:project options)}))))
+
 (defn- usage []
   (str "bbagent run [--project PATH] [provider options]\n"
        "bbagent resume SESSION_ID [provider options]\n"
        "bbagent sessions [--state PATH]\n"
        "bbagent inspect SESSION_ID [--state PATH]\n"
+       "bbagent s0a-sqlite-smoke --database PATH --project PATH\n"
        "provider options: --endpoint URL --model ID [--reasoning-effort VALUE]\n"
        "                  [--allow-insecure-http true]\n"))
 
@@ -122,9 +137,10 @@
       "sessions" (doseq [session-id (journal/list-sessions (state-root options))]
                    (println session-id))
       "inspect" (if-let [session-id (first positional)]
-                  (inspect-command session-id options)
-                  (throw (ex-info "inspect requires a session ID" {})))
+                   (inspect-command session-id options)
+                   (throw (ex-info "inspect requires a session ID" {})))
+      "s0a-sqlite-smoke" (sqlite-smoke-command options)
       "describe" (prn {:application :bbagent
-                        :scope :a0
-                        :surface :persistent-sci})
+                         :scope :s0a/sqlite-native-spike
+                         :surface :persistent-sci})
       (print (usage)))))

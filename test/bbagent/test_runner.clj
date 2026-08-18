@@ -4,6 +4,7 @@
             [bbagent.integration-test]
             [bbagent.journal-test]
             [bbagent.provider-test]
+            [bbagent.sqlite-test]
             [clojure.test :as test])
   (:gen-class))
 
@@ -13,6 +14,7 @@
                         'bbagent.coordinates-test
                         'bbagent.integration-test
                         'bbagent.journal-test
-                        'bbagent.provider-test)]
+                        'bbagent.provider-test
+                        'bbagent.sqlite-test)]
     (when (pos? (+ fail error))
       (System/exit 1))))

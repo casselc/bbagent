@@ -1,10 +1,15 @@
-# Current Scope: A0
+# Current Scope: S0a
 
-A0 contains one human, agent, model, project, session, ContextSpec, and persistent
-SCI Context. It supports project reading through the BB1 `project/read` semantic
-operation, normalized REPL/finish actions, a durable structured journal, and
-restart recovery by replaying successful forms into a fresh context.
+S0a asks whether the custom bb4t + bbagent native application can reliably use
+JNI-backed SQLite from trusted host code while the accepted A0 bounded SCI Context
+retains exactly its existing authority.
 
-It does not provide a TUI, editing, process authority, hard isolation, transparent
-SCI heap serialization, automatic memory, multiple agents, provider routing, or a
-general plugin framework.
+Owned work is limited to application-scoped `next.jdbc` and `sqlite-jdbc`
+dependencies, one file-backed commit/reopen/rollback smoke operation, exported native
+library packaging, JVM/native evidence, model-authority negative probes, measurements,
+licensing notices, and findings.
+
+S0a does not replace or modify the EDN-lines journal, design storage abstractions,
+migrate sessions, add FTS/vector search, expose SQL or JDBC to agents, add project
+search/edit/process authority, build the TUI, introduce other storage/runtime systems,
+begin BB2 broadly, or change Track A. Stop after findings and review.

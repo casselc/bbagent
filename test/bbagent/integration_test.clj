@@ -2,6 +2,7 @@
   (:require [bb4t.context :as context]
             [bb4t.runtime :as runtime]
             [bbagent.bb4t :as app-runtime]
+            [bbagent.sqlite :as sqlite]
             [clojure.test :refer [deftest is testing]])
   (:import [java.nio.file Files Path]))
 
@@ -40,4 +41,21 @@
                                  :resource-bindings {}
                                  :limits {}})]
     (is (thrown? Throwable
-                 (context/evaluate bounded "(project/read \"README.md\")")))))
+                  (context/evaluate bounded "(project/read \"README.md\")")))))
+
+(deftest sqlite-reachability-does-not-widen-model-authority-test
+  (let [project-root (fixture-project)
+        ^Path database-root (Files/createTempDirectory
+                             "bbagent-authority"
+                             (make-array java.nio.file.attribute.FileAttribute 0))
+        result (sqlite/authority-smoke! project-root
+                                        (.resolve database-root "smoke.db"))
+        surface (:context/surface result)]
+    (is (= app-runtime/context-spec (:context/spec result)))
+    (is (= app-runtime/capabilities
+           (get-in result [:context/effective :context/grants])))
+    (is (= 0 (:projected-class-count surface)))
+    (is (= 0 (:supplied-import-count surface)))
+    (is (= #{:ok} (set (vals (:positive-probes result)))))
+    (is (= #{:error} (set (vals (:negative-probes result)))))
+    (is (false? (:forbidden-database/created? result)))))
