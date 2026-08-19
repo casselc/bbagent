@@ -1,0 +1,10 @@
+{:paths ["src"]
+ :deps {org.clojure/clojure {:mvn/version "1.12.5"}
+        de.timokramer/charm.clj {:mvn/version "0.2.74"}
+        org.clojure/core.async {:mvn/version "1.8.741"}
+        com.github.clj-easy/graal-build-time {:mvn/version "1.0.5"}
+        org.jline/jline-terminal-ffm {:mvn/version "4.3.1"
+                                      :exclusions [org.jline/jline-native]}
+        org.jline/jline-terminal {:mvn/version "4.3.1"
+                                  :exclusions [org.jline/jline-native]}
+        org.jline/jline-reader {:mvn/version "4.3.1"}}}

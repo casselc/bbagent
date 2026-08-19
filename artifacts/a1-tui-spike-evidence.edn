@@ -1,0 +1,64 @@
+{:spike/milestone :a1
+ :spike/question "Does charm.clj + JLine survive the bb4t native image and drive a real terminal?"
+ :spike/result :pass
+ :spike/platform "Linux x86_64 glibc"
+
+ :toolchain {:graalvm/distribution "Oracle GraalVM 25.2.4+7.1"
+             :native-image/version "25.0.4"
+             :java/version "25.0.4+7-LTS"}
+
+ :dependencies
+ {:charm {:maven "de.timokramer/charm.clj"
+          :version "0.2.74"
+          :git/tag "v0.2.74"
+          :git/sha "718daf3291b767f90cfe9ca9389f147bb83d58cd"
+          :jar/sha256 "a142eec611db7493949dc29847329f6be2bde2fb7aa500a8b421cda00211c27e"
+          :namespaces 25
+          :source/lines 5537}
+  :jline {:version "4.3.1"
+          :artifacts ["org.jline/jline-terminal-ffm" "org.jline/jline-terminal" "org.jline/jline-reader"]
+          :exclusions ["org.jline/jline-native"]
+          :matches-bb4t? true}
+  :core.async {:bb4t/version "1.8.741"
+               :charm/requested "1.9.865"
+               :resolved "1.8.741"
+               :all-charm-namespaces-load? true}}
+
+ :required-build-config
+ {:initialize-at-build-time ["org.jline.utils.InfoCmp$Capability"]
+  :reflection ["org.jline.keymap.KeyMap" "java.util.ArrayList"]
+  :inherited-from-bb4t ["--enable-preview" "-H:+ForeignAPISupport"
+                        "-H:+SharedArenaSupport" "--enable-native-access=ALL-UNNAMED"]}
+
+ :reflective-call-sites
+ [{:site "charm/input/keymap.clj:134" :target "org.jline.keymap.KeyMap.bind"}
+  {:site "charm/render/core.clj:199" :target "java.util.ArrayList constructor"}]
+
+ :observed-failures
+ [{:phase :build
+   :cause "InfoCmp$Capability enum constants in image heap under graal-build-time namespace init"
+   :fix "--initialize-at-build-time=org.jline.utils.InfoCmp$Capability"}
+  {:phase :runtime
+   :cause "clojure.lang.Reflector could not resolve KeyMap.bind in the native image"
+   :fix "reachability-metadata.json reflection entries"}
+  {:phase :build
+   :cause "spike namespace was in the default package, so build-time init could not cover it"
+   :fix "packaged namespace bbagent.tui.spike"}]
+
+ :pty-gates
+ {:harness "real PTY via python pty.fork, TIOCSWINSZ resize plus SIGWINCH, waitpid exit status"
+  :jvm {:drew :pass :keys :pass :resize :pass :exit-line :pass :clean-exit :pass :exit-code 0}
+  :native {:drew :pass :keys :pass :resize :pass :exit-line :pass :clean-exit :pass :exit-code 0}
+  :resize/from [80 24]
+  :resize/to [100 30]}
+
+ :artifact {:name "spike"
+            :bytes 35588352
+            :sha256 "e97875d73fdde1e4928b6fc21b54564cda3ae3a85cb534d389568ad27b695dd3"
+            :build/seconds 24.0}
+
+ :nonclaims
+ ["bounded runtime proof only; not the full bbagent image"
+  "Linux x86_64 glibc only; no cross-platform or static-linking claim"
+  "no authority regression run yet; that is A1 Phase 16 work"
+  "no SQLite sidecar in this spike image"]}

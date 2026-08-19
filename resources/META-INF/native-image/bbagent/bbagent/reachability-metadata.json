@@ -1,0 +1,25 @@
+{
+  "comment": [
+    "A1 TUI reachability metadata.",
+    "charm.clj has exactly two reflective call sites, both found by compiling",
+    "the TUI with *warn-on-reflection*:",
+    "  charm/input/keymap.clj:134 -> org.jline.keymap.KeyMap.bind(Object, CharSequence...)",
+    "  charm/render/core.clj:199  -> java.util.ArrayList constructor",
+    "These register the trusted host TUI only. They add nothing to any",
+    "model-facing bb4t Context, which still projects zero classes."
+  ],
+  "reflection": [
+    {
+      "type": "org.jline.keymap.KeyMap",
+      "allPublicMethods": true,
+      "allDeclaredMethods": true,
+      "allPublicConstructors": true,
+      "allDeclaredConstructors": true
+    },
+    {
+      "type": "java.util.ArrayList",
+      "allPublicConstructors": true,
+      "allDeclaredConstructors": true
+    }
+  ]
+}
