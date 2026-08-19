@@ -99,8 +99,26 @@ requires that directory to remain empty. Removing only the sidecar produces exit
 and `UnsatisfiedLinkError`; it does not create a database. Restoring the sidecar
 restores operation.
 
-No runtime extraction, `org.sqlite.lib.path`, `java.library.path` override, or other
-undocumented loading variable is required. Fully static SQLite linkage was not tried.
+The original S0a wrapper required no operator-supplied runtime extraction,
+`org.sqlite.lib.path`, `java.library.path` override, or other undocumented loading
+variable. Fully static SQLite linkage was not tried. The current S0b follow-up below
+sets sqlite-jdbc's path/name internally after verifying the adjacent sidecar.
+
+### Current deployment contract
+
+The S0b second-pass hardening makes the previously implicit loading rule explicit and
+enforces it before any SQLite connection or database creation. The supported artifact
+is the complete Linux x86_64 glibc `dist/` bundle: exact, unrenamed
+`libsqlitejdbc.so` must remain mode `0755` beside the canonical `bbagent` executable.
+The process working directory, `TMPDIR`, and the build-time absolute export path do not
+select the runtime library. At native runtime bbagent resolves the canonical executable,
+requires the adjacent sidecar to be a regular executable file, verifies SHA-256
+`f374da845a36d0a663521457f8e454413325e3b8247a15c2677426f4b15cf6ac`, and sets
+sqlite-jdbc's path/name properties to that verified file before driver loading.
+Missing, non-executable, or digest-mismatched sidecars fail as
+`:journal-storage-failure` before a database is created. This is an integrity check,
+not protection against a local writer racing replacement in a writable deployment
+directory.
 
 ## 6. JNI And GraalVM Configuration
 
@@ -284,7 +302,10 @@ BB1 RuntimeManifest remains unchanged in meaning and still describes the accepte
 BB1 source/catalog model, not complete application physical reachability. S0a records
 the app profile, dependencies, toolchain, executable, and sidecar separately. BB2 may
 later define a BuildManifest and reachability coordinate; S0a does not pretend that
-work is complete.
+work is complete. Durable session coordinates still omit executable and deployed
+sidecar digests, application profile, toolchain identity, and physical native
+reachability. A1 inspection must not present RuntimeManifest as complete physical
+build provenance.
 
 ## 12. Remaining Limits And S0b Recommendation
 

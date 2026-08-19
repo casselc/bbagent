@@ -1,66 +1,70 @@
 {:evidence/version 1
- :recorded-at "2026-08-19T01:01:42.539997697Z"
- :source {:implementation-commit "dd9608ed0e1182abe4ecc73cbd8ae7180141a7f9"
-          :native-proof-commit "dd9608ed0e1182abe4ecc73cbd8ae7180141a7f9"}
+ :recorded-at "2026-08-19T04:49:53.501845519Z"
+ :source {:implementation-commit "1798dcd0e92a4b68facd8087ea863d8c8aacc3fa"
+          :native-proof-commit "1798dcd0e92a4b68facd8087ea863d8c8aacc3fa"}
  :method {:command "clojure -M script/measure-s0b.clj"
           :samples-per-size 1
-          :append-percentiles :within-session
+           :append-percentiles :within-session
+          :file-query-state :warm-cache-after-append
+          :reopen-state :lazy-session-recovery
+          :resume-window :first-recovery-plus-validate-checkpoint-tail
+          :labels/source :curated-from-script-control-flow
           :sizes [100 1000 10000]
           :claim :local-engineering-measurement}
  :backends
  {:file
   [{:events 100
-     :open-ns 777773
-     :append {:median-ns 312421 :p95-ns 774106 :total-ns 52515046}
-     :full-read-ns 26121271 :validate-ns 27046754
-     :latest-checkpoint-ns 11554301 :tail-events 10 :tail-read-ns 11086115
-     :reopen-ns 10745999 :resume-window-ns 21635529
-     :cas-put-ns 2492380 :cas-get-ns 1541718
+     :open-ns 811287
+     :append {:median-ns 323102 :p95-ns 664320 :total-ns 50780104}
+     :full-read-ns 92080 :validate-ns 7304
+     :latest-checkpoint-ns 97130 :tail-events 10 :tail-read-ns 483486
+     :reopen-ns 121287 :resume-window-ns 20129720
+     :cas-put-ns 2380037 :cas-get-ns 1402433
     :storage-bytes {:live 99801 :closed 99801}}
    {:events 1000
-     :open-ns 64567
-     :append {:median-ns 90447 :p95-ns 166245 :total-ns 106455717}
-     :full-read-ns 78580589 :validate-ns 74619483
-     :latest-checkpoint-ns 65134263 :tail-events 10 :tail-read-ns 58110692
-     :reopen-ns 50765461 :resume-window-ns 144527183
-     :cas-put-ns 786580 :cas-get-ns 1295296
+     :open-ns 238216
+     :append {:median-ns 103683 :p95-ns 272032 :total-ns 131110313}
+     :full-read-ns 14819 :validate-ns 3066
+     :latest-checkpoint-ns 396416 :tail-events 10 :tail-read-ns 526831
+     :reopen-ns 86900 :resume-window-ns 80675207
+     :cas-put-ns 887186 :cas-get-ns 409842
     :storage-bytes {:live 373503 :closed 373503}}
    {:events 10000
-     :open-ns 53445
-     :append {:median-ns 47934 :p95-ns 72452 :total-ns 517050430}
-     :full-read-ns 429701311 :validate-ns 467028962
-     :latest-checkpoint-ns 427503688 :tail-events 10 :tail-read-ns 429447984
-     :reopen-ns 431008500 :resume-window-ns 1260392700
-     :cas-put-ns 791500 :cas-get-ns 340908
+     :open-ns 191855
+     :append {:median-ns 54517 :p95-ns 89485 :total-ns 609004639}
+     :full-read-ns 22464 :validate-ns 4428
+     :latest-checkpoint-ns 787931 :tail-events 10 :tail-read-ns 2754990
+     :reopen-ns 103573 :resume-window-ns 516892453
+     :cas-put-ns 944858 :cas-get-ns 399081
     :storage-bytes {:live 3164505 :closed 3164505}}]
   :sqlite
   [{:events 100
-     :open-ns 79937285
-     :append {:median-ns 202697 :p95-ns 287472 :total-ns 22552826}
-     :full-read-ns 7418174 :validate-ns 6411172
-     :latest-checkpoint-ns 471443 :tail-events 10 :tail-read-ns 761551
-     :reopen-ns 779406 :resume-window-ns 5325456
-     :cas-put-ns 641316 :cas-get-ns 1053893
-    :storage-bytes {:live 2339976 :closed 172032}}
+     :open-ns 81029701
+     :append {:median-ns 205893 :p95-ns 286400 :total-ns 23145381}
+     :full-read-ns 8079667 :validate-ns 6098009
+     :latest-checkpoint-ns 416235 :tail-events 10 :tail-read-ns 769295
+     :reopen-ns 803051 :resume-window-ns 6452744
+     :cas-put-ns 635002 :cas-get-ns 1002842
+    :storage-bytes {:live 2335688 :closed 172032}}
    {:events 1000
-     :open-ns 943597
-     :append {:median-ns 115537 :p95-ns 178370 :total-ns 125419666}
-     :full-read-ns 41810999 :validate-ns 35043540
-     :latest-checkpoint-ns 361478 :tail-events 10 :tail-read-ns 551931
-     :reopen-ns 755569 :resume-window-ns 34390952
-     :cas-put-ns 286330 :cas-get-ns 141016
-    :storage-bytes {:live 4931136 :closed 864256}}
+     :open-ns 902987
+     :append {:median-ns 117660 :p95-ns 157468 :total-ns 124340603}
+     :full-read-ns 42691348 :validate-ns 43978076
+     :latest-checkpoint-ns 386005 :tail-events 10 :tail-read-ns 519697
+     :reopen-ns 681663 :resume-window-ns 35810036
+     :cas-put-ns 286550 :cas-get-ns 143621
+    :storage-bytes {:live 4927016 :closed 864256}}
    {:events 10000
-     :open-ns 968016
-     :append {:median-ns 93543 :p95-ns 112490 :total-ns 969688535}
-     :full-read-ns 342221528 :validate-ns 320889764
-     :latest-checkpoint-ns 330257 :tail-events 10 :tail-read-ns 499357
-     :reopen-ns 770489 :resume-window-ns 318594070
-     :cas-put-ns 266422 :cas-get-ns 109836
-    :storage-bytes {:live 11943632 :closed 7880704}}]}
+     :open-ns 921693
+     :append {:median-ns 98924 :p95-ns 128792 :total-ns 1051757280}
+     :full-read-ns 401640572 :validate-ns 341456752
+     :latest-checkpoint-ns 314655 :tail-events 10 :tail-read-ns 539615
+     :reopen-ns 724628 :resume-window-ns 337698140
+     :cas-put-ns 211073 :cas-get-ns 101629
+    :storage-bytes {:live 11951872 :closed 7880704}}]}
  :cumulative-checkpoints
  {:method {:messages 1000 :checkpoint-every 100 :events 1010}
-  :file {:latest-checkpoint-ns 60202267 :validate-ns 59772796
-         :storage-bytes {:live 472768 :closed 472768}}
-  :sqlite {:latest-checkpoint-ns 6834431 :validate-ns 60277394
-           :storage-bytes {:live 5254672 :closed 1224704}}}}
+  :file {:latest-checkpoint-ns 185483 :validate-ns 4739
+         :storage-bytes {:live 472771 :closed 472771}}
+  :sqlite {:latest-checkpoint-ns 7629185 :validate-ns 65642228
+           :storage-bytes {:live 5258792 :closed 1224704}}}}
