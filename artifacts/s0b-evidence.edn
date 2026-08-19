@@ -1,15 +1,18 @@
 {:s0b/evidence-version 1
  :recorded-at "2026-08-18"
- :build-root "/tmp/opencode/bbagent-s0b-20260818c"
+ :build-root "/tmp/opencode/bbagent-s0b-adversarial-20260818"
  :coordinates
- {:builder/commit "852494260e5540001ed3a723deb94ee3265e8c1f"
-  :bbagent/implementation "ad6c58549870684e397b46f12e7e96870ca977a6"
-  :measurement/commit "0b44dd0d2bb4f01f0cb1aeec5052bdab8b98c1c9"
-  :test-run/commit "852494260e5540001ed3a723deb94ee3265e8c1f"
+ {:builder/commit "1634e19a6d5ef8295f9448d442b6fecdbc89fd03"
+  :bbagent/implementation "dd9608ed0e1182abe4ecc73cbd8ae7180141a7f9"
+  :measurement/commit "dd9608ed0e1182abe4ecc73cbd8ae7180141a7f9"
+  :test-run/commit "1634e19a6d5ef8295f9448d442b6fecdbc89fd03"
   :bb4t/commit "f438307280b7a01fd20e99f54cd82682ef15d12a"
   :next.jdbc "com.github.seancorfield/next.jdbc:1.3.1118"
   :sqlite-jdbc "org.xerial/sqlite-jdbc:3.53.2.1"
-  :sqlite "3.53.2"}
+  :sqlite "3.53.2"
+  :dependency-jars
+  {:next.jdbc/sha256 "387562bfa86dc1a5a402a06a04e8e3b353f82550d296d755e5e7ce4c124275c4"
+   :sqlite-jdbc/sha256 "f55e405ed96d5ffe629e05b7b51b059e1c7d64527c0cc90a972fbac06730ccc1"}}
  :schema
  {:user-version 1
   :database-name "bbagent.sqlite3"
@@ -22,57 +25,60 @@
   :busy-timeout-ms 5000}
  :tests
  {:command "clojure -M:test"
-  :tests 55 :assertions 408 :failures 0 :errors 0
-  :log/sha256 "ede61edf3ad22cb163dc36928aff03805e0e85615c23bf13418cb415db955aba"}
+  :tests 59 :assertions 436 :failures 0 :errors 0
+  :log/sha256 "3a56ce32e618790409bdd52600ff1233e3f635833c2592d84e7ea21457adc483"}
  :build
- {:native-image-seconds 41.5
-  :wrapper-wall-seconds 251.82
-  :maximum-rss-kb 3973436
+ {:native-image-seconds 39.4
+  :wrapper-wall-seconds 191.62
+  :maximum-rss-kb 3885992
   :warnings 22
-  :log/sha256 "7eebff204871b23ad15723ee9f7c5ff92ba5eb74ec1fcd30a8c14d6488ed4a81"}
+  :warnings/counting-basis :native-image-option-and-configuration-warnings-excluding-feature-env-var-notices
+  :log/sha256 "aab6eb140d92f3b61068d08d2708a530cc09ecca450bdfffd2c4d3a17ae14c77"}
  :artifacts
  {:executable
-  {:bytes 65014016
-   :sha256 "8c606778779c3b501f9c406ffb7c831dc4bbec3a5a8c14c8a805b88ee5989b3f"
+  {:bytes 65603840
+   :sha256 "f1f07f97bc21eec2382ed8ab0f8c9877bc1a1eac8f5a6b7046dea4c0e47f1115"
    :mode "0755"}
   :sqlite-sidecar
   {:bytes 1093888
    :sha256 "f374da845a36d0a663521457f8e454413325e3b8247a15c2677426f4b15cf6ac"
    :mode "0755"}
-  :complete-distribution-bytes 66137201}
+  :complete-distribution-bytes 66727025}
  :native-session
  {:session/id "s0b-native-main"
   :create
-  {:run/id "6539b195-e66a-4ea0-8385-0dd34a325121"
+  {:run/id "63d5a5d9-708d-44fb-a832-30df7012d2ab"
    :events 28
    :last-seq 28
    :object-required? true
    :object-verified? true
    :object/digest "sha256:bca09f4a757d5571c7d9f3341d4301f3c391c090826acc1a3013c6bcb7c01722"
-   :output/sha256 "8305c852a2689781311eb32dcaeb58475e7f23d4b150e4627062a8bf2f708844"}
+   :output/sha256 "f741ad4ba438ef18e2011f5dc53e9259f44bba95c85e8490622582168f1bc2bc"}
   :resume
-  {:run/id "e2910471-ccf0-4f3e-b647-ae1d618bf8c1"
+  {:run/id "3c4c4e52-507c-4cd9-bbe1-8049c8272c63"
    :events 49
    :last-seq 49
    :reconstructed-value 70000
    :object-verified? true
-   :output/sha256 "9827f4d69aeb4a0aef0bbd717b5b6ba654bfed5cbf7184ce729274aab9e52756"}
+   :output/sha256 "f5ec7be7385ff57fcdfb532e33bd8b79bc948361ab51e51ebcbcd4560fbb218d"}
   :database
   {:bytes 200704
-   :sha256 "9d54c072b47ba465844857072607aea3058965398544c1b710e220c0f4134414"}
+   :sha256 "3635e5d3403082bdb8c1c854389f27f580539bf329d8f555a2476cd0f6f5f63a"}
   :listed? true
   :inspected-events 49
-  :inspect/output-sha256 "2d6d8c34aac5ba923b7ef478ff2b7363977def7f632c6a3dd68193fddffc8d20"}
+  :inspect/output-sha256 "7f2e1da16c3e7762f29df0629b6c7f310cada64c6e6eb0281740a3bbc1707df3"}
  :failure-probes
  {:ambiguous-effect
   {:hard-exit 73
    :recovery-status :failed-closed
    :error/category :session-recovery-failure
-   :output/sha256 "b6a17e84c70af9a70f428f0c721ced95b7b80fea1d9b4c2b5874c0a48ddd340a"}
+   :output/sha256 "379eebee6691110c8d66ceac5615c835267477e7661f96cf4c0c2ba1493f25f6"}
   :uncommitted-transaction
   {:hard-exit 74
    :baseline-events 1
+   :staged-object-and-referencing-event? true
    :uncommitted-object-visible? false
+   :setup-output/sha256 "a96335a9839530ec0b1d29bf3eccb860c5f071f196f67a6689d812870a7f23fb"
    :output/sha256 "f129bdff5113785fdd38d204e7e1a6c7a87d18096e4bfde00c56af7978e86fd0"}
   :missing-sidecar {:exit 1 :database-created? false}
   :runtime-temp-entry-count 0}
@@ -84,22 +90,27 @@
   :projected-class-count 0
   :supplied-import-count 0
   :forbidden-database-created? false
-  :output/sha256 "ff1378c42484107b9bf4b46b35f0bda8d2e9f396794f4d116a86bb39057c1f5d"}
+  :output/sha256 "a8dbc22116d833d59c595d7f1dd624409d62c6261620ad9b52dfa2c79d24e392"}
  :native-startup
- {:method {:warmups 5 :samples 30 :command "bbagent describe"}
-  :s0a {:median-ns 5176555 :p95-ns 5565426 :mean-ns 5123863
-        :log/sha256 "8d1fe855865cce563e1315a12862ef59124f369afdf322deac296bc05aecefdb"}
-  :s0b {:median-ns 5048694 :p95-ns 5637176 :mean-ns 4857606
-        :log/sha256 "ddff8ba8b9243ee59336660065ca4f99a1264faf03fe4a02c6fc87bd68e8818c"}}
- :measurements "artifacts/s0b-measurements.edn"
+ {:method {:warmups 5 :samples 30 :command "bbagent describe"
+           :s0a/builder "f979f96449ccb648a737832125a93b5616399014"
+           :s0a/implementation "45a63073ad02646bb99b2eb9d182060c7473b432"
+           :s0b/builder "1634e19a6d5ef8295f9448d442b6fecdbc89fd03"
+           :s0b/implementation "dd9608ed0e1182abe4ecc73cbd8ae7180141a7f9"}
+  :s0a {:median-ns 5053404 :p95-ns 5634502 :mean-ns 5036704
+        :log/sha256 "8ec06d2988e9cfa9b04bb804e7e687ac2206b739cbc43d62a6e393274954f1d8"}
+  :s0b {:median-ns 5220240 :p95-ns 5706843 :mean-ns 5150041
+        :log/sha256 "7d01741b50c15123739eb679ca4e2c47faee3056e411bb07759aef461b667e97"}}
+ :measurements
+ {:path "artifacts/s0b-measurements.edn"
+  :sha256 "feb31fb60e4fc6e54ce8b83041a7dbd73acc0dd6b4dab22cf396e4d394c772a7"}
  :retained-logs
- {:build "/tmp/opencode/bbagent-s0b-build-c.log"
-  :tests "/tmp/opencode/bbagent-s0b-20260818c/jvm-tests.log"
-  :manifest "/tmp/opencode/bbagent-s0b-20260818c/build-evidence.txt"
-  :create "/tmp/opencode/bbagent-s0b-20260818c/s0b-create.edn"
-  :resume "/tmp/opencode/bbagent-s0b-20260818c/s0b-resume.edn"
-  :inspect "/tmp/opencode/bbagent-s0b-20260818c/s0b-inspect.edn"
-  :authority "/tmp/opencode/bbagent-s0b-20260818c/s0b-authority.edn"
-  :post-build-measurements
-  {:path "/tmp/opencode/bbagent-s0b-20260818c/post-build-measurements.txt"
-   :sha256 "8956fc2abdf6e14a023deb878e45076d2b34a8c43e78388dd6d47ae00417c91f"}}}
+ {:build "/tmp/opencode/bbagent-s0b-adversarial-build.log"
+  :tests "/tmp/opencode/bbagent-s0b-adversarial-20260818/jvm-tests.log"
+  :manifest "/tmp/opencode/bbagent-s0b-adversarial-20260818/build-evidence.txt"
+  :create "/tmp/opencode/bbagent-s0b-adversarial-20260818/s0b-create.edn"
+  :resume "/tmp/opencode/bbagent-s0b-adversarial-20260818/s0b-resume.edn"
+  :inspect "/tmp/opencode/bbagent-s0b-adversarial-20260818/s0b-inspect.edn"
+  :authority "/tmp/opencode/bbagent-s0b-adversarial-20260818/s0b-authority.edn"
+  :startup-s0a "/tmp/opencode/bbagent-s0b-adversarial-20260818/startup-s0a.ns"
+  :startup-s0b "/tmp/opencode/bbagent-s0b-adversarial-20260818/startup-s0b.ns"}}
