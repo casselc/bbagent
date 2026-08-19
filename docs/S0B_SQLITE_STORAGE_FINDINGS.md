@@ -541,3 +541,21 @@ Do not represent this recommendation as implementing any of the following:
 - TUI, prompt/model-loop redesign, multi-agent behavior, A1, or broad BB2 work.
 
 Stop here for S0b findings and fresh review. Do not begin A1 as part of this decision.
+
+## 14. Closure Note
+
+This section is appended at S0 closure. It records a later decision and changes no
+measurement, verdict, coordinate, or evidence above.
+
+The fresh review section 13 required was performed and accepted. The recommendation
+to switch **new sessions** to SQLite is implemented after this findings commit, so
+section 1's statement that "the implementation's current default remains `file`" and
+section 13's "the code at this finding still defaults to file" describe the code at
+the time of measurement, not the current default. The current default, the retained
+file-backend policy, and the frozen S0a/S0b coordinates are recorded in
+`docs/S0_CLOSURE.md`.
+
+The accepted change is limited to backend selection defaults. No storage semantics,
+schema, durability policy, transaction boundary, CAS behaviour, recovery rule, or
+authority result recorded above was altered, and the long-session debt in section 12
+remains open and unaddressed.

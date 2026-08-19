@@ -180,7 +180,10 @@
         "bbagent s0b-native-smoke --phase PHASE --state PATH --session ID [--project PATH]\n"
        "provider options: --endpoint URL --model ID [--reasoning-effort VALUE]\n"
        "                  [--allow-insecure-http true]\n"
-       "--store selects the durable backend and defaults to file\n"))
+       "--store selects the durable backend and defaults to sqlite\n"
+       "  new sessions use sqlite unless --store file is given\n"
+       "  an existing session must be opened with the backend that stores\n"
+       "  it; there is no migration between backends\n"))
 
 (defn -main [& args]
   (let [[command & command-args] args

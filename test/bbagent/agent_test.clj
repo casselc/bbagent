@@ -34,8 +34,9 @@
          (:bbagent/error (ex-data failure)))))
 
 (deftest store-backend-selection-test
+  (testing "an unspecified backend selects sqlite"
+    (is (= :sqlite (storage/backend nil))))
   (testing "backend values normalize to :file or :sqlite"
-    (is (= :file (storage/backend nil)))
     (is (= :file (storage/backend :file)))
     (is (= :file (storage/backend "file")))
     (is (= :sqlite (storage/backend :sqlite)))
@@ -46,12 +47,24 @@
     (is (= :journal-storage-failure (error-category #(storage/backend 42))))))
 
 (deftest store-backend-artifacts-test
-  (testing "file remains the default backend"
+  (testing "a new session defaults to sqlite"
     (let [state-root (temp-root "bbagent-default-state")
           agent-session (session/start! {:state-root state-root
                                          :project-root (project)
                                          :model-provider (provider/fake [])
                                          :system-prompt "test prompt"})]
+      (try
+        (is (path-exists? state-root "bbagent.sqlite3"))
+        (is (not (path-exists? state-root "sessions"))
+            "the default new session writes no file-backend journal")
+        (finally (session/close! agent-session :test-end)))))
+  (testing "file remains explicitly selectable"
+    (let [state-root (temp-root "bbagent-explicit-file-state")
+          agent-session (session/start! {:state-root state-root
+                                         :project-root (project)
+                                         :model-provider (provider/fake [])
+                                         :system-prompt "test prompt"
+                                         :store-backend :file})]
       (try
         (is (path-exists? state-root "sessions"))
         (is (not (path-exists? state-root "bbagent.sqlite3")))
@@ -66,6 +79,44 @@
       (try
         (is (path-exists? state-root "bbagent.sqlite3"))
         (finally (session/close! agent-session :test-end))))))
+
+(deftest existing-session-backend-identity-test
+  (testing "an existing file session is never reinterpreted by the new default"
+    (let [state-root (temp-root "bbagent-backend-identity")
+          session-id "backend-identity-session"
+          created (session/start! {:state-root state-root
+                                   :project-root (project)
+                                   :model-provider (provider/fake [])
+                                   :system-prompt "test prompt"
+                                   :session-id session-id
+                                   :store-backend :file})]
+      (session/close! created :test-end)
+      (testing "the default backend does not find the file session"
+        (is (= :session-recovery-failure
+               (error-category
+                #(session/resume! {:state-root state-root
+                                   :session-id session-id
+                                   :model-provider (provider/fake [])
+                                   :system-prompt "test prompt"})))))
+      (testing "the file session's durable events are untouched"
+        (let [file-store (storage/open! state-root :file)]
+          (try
+            (is (= [session-id] (store/list-sessions file-store)))
+            (is (pos? (store/validate-session! file-store session-id)))
+            (finally (store/close-store! file-store)))))
+      (testing "no file session leaked into the sqlite store"
+        (let [sqlite-store (storage/open! state-root :sqlite)]
+          (try
+            (is (= [] (store/list-sessions sqlite-store)))
+            (finally (store/close-store! sqlite-store)))))
+      (testing "explicit file selection resumes it"
+        (let [resumed (session/resume! {:state-root state-root
+                                        :session-id session-id
+                                        :model-provider (provider/fake [])
+                                        :system-prompt "test prompt"
+                                        :store-backend :file})]
+          (is (= session-id (:session-id resumed)))
+          (session/close! resumed :test-end))))))
 
 (deftest fake-provider-end-to-end-test
   (doseq [backend backends]

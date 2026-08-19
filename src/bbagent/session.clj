@@ -63,9 +63,13 @@
                           :repl/replay-forms @(:replay-forms session)}))
 
 (defn start!
+  "Starts a new session.  store-backend defaults to :sqlite for newly
+   created sessions; pass :file for the human-readable reference backend.
+   Creating a session never reads, imports, or converts state held by the
+   other backend."
   [{:keys [state-root project-root model-provider system-prompt session-id
            store-backend]
-    :or {session-id (coordinates/new-session-id) store-backend :file}}]
+    :or {session-id (coordinates/new-session-id) store-backend :sqlite}}]
   (let [run-id (coordinates/new-run-id)
         project (coordinates/project-description project-root)
         event-store (storage/open! state-root store-backend)
@@ -179,8 +183,14 @@
      tail)))
 
 (defn resume!
+  "Resumes session-id from the selected backend.  store-backend defaults to
+   :sqlite, matching start!.  Selection is never inferred from the state
+   root: a session stored by the file backend must be resumed with
+   :file.  Resuming with the wrong backend fails as
+   :session-recovery-failure; it never reinterprets or migrates the other
+   backend's durable state."
   [{:keys [state-root session-id model-provider system-prompt store-backend]
-    :or {store-backend :file}}]
+    :or {store-backend :sqlite}}]
   (let [event-store (storage/open! state-root store-backend)]
     (try
       (let [_ (store/validate-session! event-store session-id)

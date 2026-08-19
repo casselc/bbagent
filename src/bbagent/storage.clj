@@ -12,11 +12,15 @@
 
 (defn backend
   "Normalizes a backend selection to :file or :sqlite.  Accepts the
-   keywords or the strings \"file\"/\"sqlite\"; nil defaults to :file.
-   Anything else is rejected with :journal-storage-failure."
+   keywords or the strings \"file\"/\"sqlite\"; nil defaults to :sqlite.
+   Anything else is rejected with :journal-storage-failure.
+
+   The default applies to a newly created session.  Callers that open an
+   existing session must select its backend explicitly; nothing here
+   infers, probes, or migrates an existing session's physical location."
   [value]
   (let [selected (cond
-                   (nil? value) :file
+                   (nil? value) :sqlite
                    (keyword? value) value
                    (string? value) (keyword value)
                    :else ::invalid)]

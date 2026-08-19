@@ -1,24 +1,50 @@
-# Current Scope: S0b
+# Current Scope: A1
 
-S0b asks whether SQLite can implement the accepted A0 durable event journal and
-content-addressed object semantics more simply and scalably without weakening
-durability, recovery, provenance, or the bounded SCI authority proven by S0a.
+**Milestone status:** A0 PASS, S0a PASS, S0b PASS, A1 ACTIVE.
 
-Owned work is limited to a small file/SQLite store contract, one local database per
-application state root, canonical event and object persistence, conservative SQLite
-durability policy, transactional schema versioning, differential recovery tests,
-explicit backend selection, native create/resume evidence, measurements, and findings.
+A1 asks whether a native interactive TUI can become the preferred human/operator
+interface to bbagent while remaining only a projection and controller over the
+existing `AgentSession`, store, and bb4t semantic state, without inventing a second
+state model or a second authority path.
 
-The file backend is a single-owner reference store: one `FileStore` holds an exclusive
-state-root lock, recovers sessions lazily, caches recovered events, and isolates a
-corrupt session from listing and healthy-session reads. SQLite uses immediate write
-transactions and remains the multi-process-capable storage candidate; S0b does not
-claim writer-throughput or fairness results for it.
+## Owned Work
 
-The EDN-lines journal remains the reference backend. S0b does not redesign agent
-memory, prompts, the model loop, or the TUI; expose SQL, JDBC, database paths, or
-trusted storage namespaces to model SCI; add FTS, vectors, editing, processes,
-multi-agent behavior, replication, or other storage systems; begin A1 or BB2 broadly;
-or change Track A. Runtime sidecar verification is an expected-dependency integrity
-gate, not a BuildManifest: durable coordinates still do not claim physical executable
-reachability. Stop after findings and fresh review.
+A thin interactive client in bbagent: a bounded TUI runtime spike with a native
+proof and an ADR; transient view state kept separate from durable application state;
+a small command/event seam so model work does not block terminal redraw; header,
+conversation, input, operator REPL, context/capability inspector, and incremental
+event panes; a small session browser over `list-sessions`; structured error
+presentation and structured event drill-down; a discoverable keymap and documented
+interrupt semantics; native evidence including the TUI and the SQLite sidecar; an
+extended authority regression corpus covering the TUI implementation classes and
+namespaces; deterministic view-model, reducer, incremental-event, agent-integration,
+and resume tests; a dogfood session and findings.
+
+The TUI reaches semantic state only through `bbagent.session`, `bbagent.agent`,
+`bbagent.storage`, `bbagent.store`, and the public bb4t facade. It does not call bb4t
+kernel internals, bypass `AgentSession` for model turns, depend on
+`bbagent.sqlite-store` internals, JDBC, or SQL schema details, or acquire generic
+filesystem, process, or database authority and re-expose it through UI callbacks. The
+operator REPL attaches to the actual bounded session Context; a trusted host REPL is
+not introduced. Durable checkpoint semantics are unchanged; A1 may exploit the indexed
+`latest-checkpoint`, `events-after`, and request lookups for UI efficiency only.
+
+S0 closure is complete and recorded in `docs/S0_CLOSURE.md`. New sessions default to
+SQLite; existing sessions keep their backend identity and are never inferred,
+converted, or migrated.
+
+## Explicit Exclusions
+
+No project listing, search, grep, editing, or test capability; no shell, process, or
+Git mutation; no SmolVM, pods, or hard worker isolation; no memory, embeddings,
+vector search, SQLite FTS, or session full-text search; no work/issues, skills, or
+model routing; no planner, reviewer, subagents, or multi-agent console; no MCP, A2A,
+ACP, web UI, or HTTP server; no generalized BB2 BuildManifest or build-profile
+framework; no storage migration, import, object GC, checkpoint redesign, archival, or
+retention; no Track A changes. The bundled SQLite having FTS5 is not permission to add
+search. Milestone evidence commands stay out of the TUI.
+
+## Stop Gate
+
+Stop after A1 findings and fresh review. Do not begin the next milestone
+automatically; recommend it from dogfood evidence.
