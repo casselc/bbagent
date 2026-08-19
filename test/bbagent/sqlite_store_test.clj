@@ -230,7 +230,30 @@
         store (ss/sqlite-store root)]
     (store/close-store! store)
     (with-open [^java.sql.Connection connection (raw-connection store)]
-      (jdbc/execute-one! connection ["PRAGMA user_version = 2"]))
+      (jdbc/execute-one! connection ["PRAGMA journal_mode = DELETE"])
+      (jdbc/execute-one! connection ["PRAGMA user_version = 2"])
+      (is (= "delete" (:journal_mode
+                        (jdbc/execute-one! connection ["PRAGMA journal_mode"]
+                                           result-options)))))
+    (is (= :journal-storage-failure
+           (error-category #(ss/sqlite-store root))))
+    (with-open [^java.sql.Connection connection (raw-connection store)]
+      (is (= 2 (:user_version
+                (jdbc/execute-one! connection ["PRAGMA user_version"]
+                                   result-options))))
+      (is (= "delete" (:journal_mode
+                        (jdbc/execute-one! connection ["PRAGMA journal_mode"]
+                                           result-options)))))))
+
+(deftest unsupported-negative-version-test
+  (let [root (temp-root)
+        store (ss/sqlite-store root)]
+    (store/close-store! store)
+    (with-open [^java.sql.Connection connection (raw-connection store)]
+      (jdbc/execute-one! connection ["PRAGMA user_version = -1"])
+      (is (= -1 (:user_version
+                 (jdbc/execute-one! connection ["PRAGMA user_version"]
+                                    result-options)))))
     (is (= :journal-storage-failure
            (error-category #(ss/sqlite-store root))))))
 

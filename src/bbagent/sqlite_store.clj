@@ -122,17 +122,16 @@
         lock (Object.)
         closed? (atom false)]
     (try
-      (let [policy (apply-pragmas! connection)
-            version (:user_version
+      (let [version (:user_version
                      (jdbc/execute-one! connection ["PRAGMA user_version"]
-                                        result-options))]
-        (cond
-          (= 0 version) (run-transaction! connection create-schema!)
-          (> version schema-version)
-          (throw (errors/error :journal-storage-failure
-                               "Unsupported SQLite schema version"
-                               {:user_version version}))
-          :else nil)
+                                         result-options))
+            _ (when-not (#{0 schema-version} version)
+                (throw (errors/error :journal-storage-failure
+                                     "Unsupported SQLite schema version"
+                                     {:user_version version})))
+            policy (apply-pragmas! connection)]
+        (when (= 0 version)
+          (run-transaction! connection create-schema!))
         (->SqliteStore connection lock closed? policy (str db-path)))
       (catch Throwable failure
         (.close connection)
@@ -244,11 +243,13 @@
                        ["SELECT COALESCE(MAX(seq), 0) AS max_seq
                          FROM event WHERE session_id = ?" session-id]
                        result-options)
-              seq-number (inc (:max_seq max-row))
-              prepared (store/prepare-event (store/strip-secrets event)
-                                            seq-number)
-              stored-event (store/externalize (object-storer connection)
-                                              prepared)
+               seq-number (inc (:max_seq max-row))
+               prepared (store/prepare-event (store/strip-secrets event)
+                                             seq-number)
+               _ (store/validate-object-references! (object-loader connection)
+                                                     prepared)
+               stored-event (store/externalize (object-storer connection)
+                                               prepared)
               payload (store/encode-payload stored-event)
               checksum (store/semantic-checksum stored-event)]
           (jdbc/execute-one!
@@ -313,6 +314,43 @@
                            " FROM event WHERE session_id = ? ORDER BY seq")
                       session-id]
                      result-options)))
+        (catch Throwable failure
+          (throw (recovery-failure failure)))))))
+
+(defn unresolved-effects [store session-id]
+  (locking (:lock store)
+    (ensure-open! store)
+    (store/validate-session-id! session-id)
+    (let [^Connection connection (:connection store)]
+      (try
+        (mapv (fn [row]
+                (cond-> {:effect/type (if (= "model/request" (:event_type row))
+                                        :model :repl)
+                         :request/id (:request_id row)
+                         :event/id (:event_id row)
+                         :event/seq (:seq row)}
+                  (= "repl/request" (:event_type row))
+                  (assoc :action/id (:action_id row))))
+              (jdbc/execute!
+               connection
+               ["SELECT e.seq, e.event_id, e.event_type, e.request_id, e.action_id
+                 FROM event e
+                 WHERE e.session_id = ? AND
+                   ((e.event_type = 'model/request' AND NOT EXISTS
+                     (SELECT 1 FROM event r
+                      WHERE r.session_id = e.session_id
+                        AND r.event_type = 'model/response'
+                        AND r.request_id IS e.request_id AND r.seq > e.seq))
+                    OR
+                    (e.event_type = 'repl/request' AND NOT EXISTS
+                     (SELECT 1 FROM event r
+                      WHERE r.session_id = e.session_id
+                        AND r.event_type = 'repl/result'
+                        AND r.request_id IS e.request_id
+                        AND r.action_id IS e.action_id AND r.seq > e.seq)))
+                 ORDER BY e.seq"
+                session-id]
+               result-options))
         (catch Throwable failure
           (throw (recovery-failure failure)))))))
 
@@ -476,6 +514,8 @@
     (events store session-id))
   (validate-session! [store session-id]
     (validate-session! store session-id))
+  (unresolved-effects [store session-id]
+    (unresolved-effects store session-id))
   (events-after [store session-id event-id]
     (events-after store session-id event-id))
   (first-event [store session-id event-type]

@@ -7,6 +7,8 @@ BBAGENT_REPOSITORY=${BBAGENT_REPOSITORY:-https://github.com/casselc/bbagent.git}
 BB4T_COMMIT=${BB4T_COMMIT:-f438307280b7a01fd20e99f54cd82682ef15d12a}
 BBAGENT_COMMIT=${BBAGENT_COMMIT:-ad6c58549870684e397b46f12e7e96870ca977a6}
 SQLITE_SIDECAR_SHA256=f374da845a36d0a663521457f8e454413325e3b8247a15c2677426f4b15cf6ac
+SQLITE_JDBC_JAR_SHA256=f55e405ed96d5ffe629e05b7b51b059e1c7d64527c0cc90a972fbac06730ccc1
+NEXT_JDBC_JAR_SHA256=387562bfa86dc1a5a402a06a04e8e3b353f82550d296d755e5e7ce4c124275c4
 NEXT_JDBC_LICENSE_SHA256=9de5ceada4e5d000784566d4e8f95581984c7287e8b3d55e41639c9ec38ea2db
 SCRIPT_ROOT=$(git -C "$(dirname "$0")/.." rev-parse --show-toplevel)
 BUILDER_COMMIT=$(git -C "$SCRIPT_ROOT" rev-parse HEAD)
@@ -51,6 +53,19 @@ printf '%s\n' "$BBAGENT_RESOLVED" \
 pushd "$BUILD_ROOT/bb4t" >/dev/null
 BABASHKA_FEATURE_JDBC=false BABASHKA_FEATURE_SQLITE=false \
   BB4T_APPLICATION=bbagent BABASHKA_BINARY=bbagent script/uberjar
+M2_REPOSITORY=${M2_REPOSITORY:-"$HOME/.m2/repository"}
+SQLITE_JDBC_JAR="$M2_REPOSITORY/org/xerial/sqlite-jdbc/3.53.2.1/sqlite-jdbc-3.53.2.1.jar"
+NEXT_JDBC_JAR="$M2_REPOSITORY/com/github/seancorfield/next.jdbc/1.3.1118/next.jdbc-1.3.1118.jar"
+SQLITE_JDBC_JAR_ACTUAL=$(sha256sum "$SQLITE_JDBC_JAR")
+SQLITE_JDBC_JAR_ACTUAL=${SQLITE_JDBC_JAR_ACTUAL%% *}
+NEXT_JDBC_JAR_ACTUAL=$(sha256sum "$NEXT_JDBC_JAR")
+NEXT_JDBC_JAR_ACTUAL=${NEXT_JDBC_JAR_ACTUAL%% *}
+if [ "$SQLITE_JDBC_JAR_ACTUAL" != "$SQLITE_JDBC_JAR_SHA256" ] || \
+   [ "$NEXT_JDBC_JAR_ACTUAL" != "$NEXT_JDBC_JAR_SHA256" ]
+then
+  echo "Pinned SQLite storage dependency JAR digest mismatch" >&2
+  exit 1
+fi
 BABASHKA_FEATURE_JDBC=false BABASHKA_FEATURE_SQLITE=false \
   BB4T_APPLICATION=bbagent BABASHKA_BINARY=bbagent \
   script/compile "-Dorg.sqlite.lib.exportPath=$DIST_DIR"
@@ -229,6 +244,8 @@ fi
   printf 'bbagent_commit=%s\n' "$BBAGENT_COMMIT"
   printf 'sqlite_jdbc=org.xerial:sqlite-jdbc:3.53.2.1\n'
   printf 'next_jdbc=com.github.seancorfield:next.jdbc:1.3.1118\n'
+  printf 'sqlite_jdbc_jar_sha256=%s\n' "$SQLITE_JDBC_JAR_ACTUAL"
+  printf 'next_jdbc_jar_sha256=%s\n' "$NEXT_JDBC_JAR_ACTUAL"
   printf 'missing_sidecar_exit=%s\n' "$MISSING_SIDECAR_EXIT"
   printf 's0b_ambiguous_exit=%s\n' "$S0B_AMBIGUOUS_EXIT"
   printf 's0b_transaction_exit=%s\n' "$S0B_TRANSACTION_EXIT"

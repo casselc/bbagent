@@ -256,10 +256,106 @@
         (is (= :session-recovery-failure
                (error-category
                 #(session/resume! {:state-root state-root
-                                   :session-id session-id
-                                   :model-provider (provider/fake [])
-                                   :system-prompt "test prompt"
-                                   :store-backend backend}))))))))
+                                    :session-id session-id
+                                    :model-provider (provider/fake [])
+                                    :system-prompt "test prompt"
+                                    :store-backend backend}))))))))
+
+(deftest checkpoint-cannot-hide-unresolved-repl-effect-test
+  (doseq [backend backends]
+    (testing (str "backend " (name backend))
+      (let [state-root (temp-root "bbagent-checkpoint-ambiguity-state")
+            first-session
+            (session/start! {:state-root state-root
+                             :project-root (project)
+                             :model-provider (provider/fake [])
+                             :system-prompt "test prompt"
+                             :store-backend backend})
+            session-id (:session-id first-session)]
+        (store/append-event! (:store first-session) session-id
+                             {:event/type :repl/request
+                              :request/id "checkpoint-interrupted-request"
+                              :action/id "checkpoint-interrupted-action"
+                              :repl/source "(def interrupted 1)"})
+        (session/checkpoint! first-session :after-interrupted-request)
+        (session/close! first-session :test-end)
+        (let [failure
+              (try
+                (session/resume! {:state-root state-root
+                                  :session-id session-id
+                                  :model-provider (provider/fake [])
+                                  :system-prompt "test prompt"
+                                  :store-backend backend})
+                nil
+                (catch clojure.lang.ExceptionInfo failure failure))]
+          (is (= :session-recovery-failure
+                 (:bbagent/error (ex-data failure))))
+          (is (= [{:effect/type :repl
+                   :request/id "checkpoint-interrupted-request"
+                   :action/id "checkpoint-interrupted-action"}]
+                 (mapv #(select-keys % [:effect/type :request/id :action/id])
+                       (get-in (ex-data failure) [:error/data :effects])))))))))
+
+(deftest successful-provider-persistence-failure-is-not-provider-error-test
+  (doseq [backend backends]
+    (testing (str "backend " (name backend))
+      (let [state-root (temp-root "bbagent-provider-persistence-state")
+            completions (atom 0)
+            model (provider/fake
+                   [(fn [_]
+                      (swap! completions inc)
+                      (provider/fake-response
+                       {:action/type :finish :message "completed"}))])
+            first-session
+            (session/start! {:state-root state-root
+                             :project-root (project)
+                             :model-provider model
+                             :system-prompt "test prompt"
+                             :store-backend backend})
+            session-id (:session-id first-session)
+            append-session-event! @#'bbagent.session/append-session-event!
+            failed? (atom false)
+            failure
+            (try
+              (with-redefs-fn
+                {#'bbagent.session/append-session-event!
+                 (fn [agent-session event]
+                   (if (and (= :model/response (:event/type event))
+                            (= :ok (:response/status event))
+                            (compare-and-set! failed? false true))
+                     (throw (ex-info "injected response persistence failure"
+                                     {:bbagent/error :journal-storage-failure}))
+                     (append-session-event! agent-session event)))}
+                #(session/request-model! first-session))
+              nil
+              (catch clojure.lang.ExceptionInfo failure failure))
+            events (session/session-events first-session)]
+        (is (= 1 @completions))
+        (is (= :journal-storage-failure (:bbagent/error (ex-data failure))))
+        (is (= [:model/request]
+               (->> events
+                    (filter #(#{:model/request :model/response} (:event/type %)))
+                    (mapv :event/type))))
+        (is (empty? (filter #(and (= :model/response (:event/type %))
+                                  (= :error (:response/status %)))
+                            events)))
+        (session/checkpoint! first-session :after-provider-persistence-failure)
+        (session/close! first-session :test-end)
+        (let [recovery-failure
+              (try
+                (session/resume! {:state-root state-root
+                                  :session-id session-id
+                                  :model-provider (provider/fake [])
+                                  :system-prompt "test prompt"
+                                  :store-backend backend})
+                nil
+                (catch clojure.lang.ExceptionInfo failure failure))]
+          (is (= :session-recovery-failure
+                 (:bbagent/error (ex-data recovery-failure))))
+          (is (= [:model]
+                 (mapv :effect/type
+                       (get-in (ex-data recovery-failure)
+                               [:error/data :effects])))))))))
 
 (deftest coordinate-preservation-test
   (doseq [backend backends]

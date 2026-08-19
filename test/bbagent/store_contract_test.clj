@@ -258,12 +258,34 @@
           (is (= :utf-8 (:encoding (:form small-reference))))
           (is (= (utf-8-bytes object-small) (:bytes (:form small-reference))))
           (is (= (str "sha256:" (coordinates/sha-256 object-small)) small-digest))
-          (is (= (:form small-reference) (:form small-again))
-              "duplicate CAS insertion of identical content is idempotent")
+           (is (= (:form small-reference) (:form small-again))
+               "duplicate CAS insertion of identical content is idempotent")
            (is (= object-small (store/get-object store alpha-session-id small-digest)))
            (is (= object-large (store/get-object store alpha-session-id large-digest)))
            (is (= object-small (store/get-object store "cross-session" small-digest))
-               "content identity is state-root-wide on both backends")))
+               "content identity is state-root-wide on both backends")
+           (store/append-event! store "delta-session"
+                                {:event/type :model/response
+                                 :event/id "evt-d-02"
+                                 :event/time "2026-01-03T00:00:03Z"
+                                 :content small-reference})
+           (is (= object-small
+                  (:content (second (store/events store "delta-session")))))))
+
+       (testing "caller-supplied dangling object references cannot commit"
+         (let [dangling (tagged-literal
+                         'bbagent/blob
+                         {:digest (str "sha256:" (apply str (repeat 64 "0")))
+                          :bytes 7
+                          :encoding :utf-8})]
+           (is (= :journal-storage-failure
+                  (error-category
+                   #(store/append-event! store "delta-session"
+                                         {:event/type :model/response
+                                          :event/id "evt-d-03"
+                                          :event/time "2026-01-03T00:00:04Z"
+                                          :content dangling}))))
+           (is (= 2 (count (store/events store "delta-session"))))))
 
        (testing "objects alone do not create a logical session"
          (store/put-object! store "object-only" "unreferenced object")
@@ -376,7 +398,7 @@
                   :alpha-final 8
                   :auto 2
                   :sigma 1
-                  :delta 1
+                   :delta 2
                   :bravo 1
                   :absent 0}
          :objects {:small {:digest small-digest

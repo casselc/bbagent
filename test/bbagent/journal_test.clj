@@ -260,5 +260,14 @@
   (is (= "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
          (coordinates/sha-256 "hello")))
   (is (= (coordinates/sha-256 "hello world")
-         (coordinates/sha-256-bytes
-          (.getBytes "hello world" StandardCharsets/UTF_8)))))
+          (coordinates/sha-256-bytes
+           (.getBytes "hello world" StandardCharsets/UTF_8)))))
+
+(deftest foreign-tagged-literal-round-trip-test
+  (let [root (temp-root)
+        session-id "foreign-tag-session"
+        fs (journal/file-store root)
+        value (tagged-literal 'example/value {:x 1})]
+    (store/append-event! fs session-id
+                         {:event/type :model/response :content value})
+    (is (= value (:content (first (store/events fs session-id)))))))

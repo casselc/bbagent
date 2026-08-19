@@ -134,7 +134,19 @@
 (defn transaction-exit! [{:keys [state-root session-id]}]
   (let [root-store (storage/open! state-root :sqlite)
         digest (coordinates/sha-256 uncommitted-content)
-        bytes (.getBytes ^String uncommitted-content StandardCharsets/UTF_8)]
+        bytes (.getBytes ^String uncommitted-content StandardCharsets/UTF_8)
+        reference (tagged-literal 'bbagent/blob
+                                  {:digest (str "sha256:" digest)
+                                   :bytes (alength bytes)
+                                   :encoding :utf-8})
+        event (store/prepare-event
+               {:event/id "s0b-transaction-uncommitted-event"
+                :event/time "2026-08-18T00:00:00Z"
+                :event/type :s0b/uncommitted-object
+                :object/content reference}
+               2)
+        payload (.getBytes ^String (store/encode-payload event)
+                           StandardCharsets/UTF_8)]
     (store/append-event! root-store session-id
                          {:event/id "s0b-transaction-baseline"
                           :event/type :session/started})
@@ -144,8 +156,15 @@
      ["INSERT INTO object (digest, bytes, encoding, media_type, content)
        VALUES (?, ?, ?, ?, ?)"
       digest (alength bytes) "utf-8" nil bytes])
+    (jdbc/execute-one!
+     (:connection root-store)
+     ["INSERT INTO event
+       (session_id, seq, event_id, event_type, event_time, request_id,
+        action_id, payload, checksum) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      session-id 2 (:event/id event) "s0b/uncommitted-object"
+      (:event/time event) nil nil payload (store/semantic-checksum event)])
     (prn {:session/id session-id
-          :stage :uncommitted-object-inserted
+          :stage :uncommitted-object-and-event-inserted
           :object/digest (str "sha256:" digest)})
     (flush)
     (.halt (Runtime/getRuntime) 74)))

@@ -184,8 +184,14 @@
   (let [event-store (storage/open! state-root store-backend)]
     (try
       (let [_ (store/validate-session! event-store session-id)
+            unresolved (seq (store/unresolved-effects event-store session-id))
+            _ (when unresolved
+                (throw (errors/error
+                        :session-recovery-failure
+                        "An external effect was interrupted before its result was durable"
+                        {:effects (vec unresolved)})))
             started (or (store/first-event event-store session-id
-                                           :session/started)
+                                            :session/started)
                         (throw (errors/error :session-recovery-failure
                                              "Session has no start event"
                                              {:session/id session-id})))
@@ -269,24 +275,25 @@
                             :request/id request-id
                             :provider/config provider-config
                             :model/request request})
-    (try
-      (let [response (provider/complete (:provider session) request)]
-        (append-session-event! session
-                               {:event/type :model/response
-                                :request/id request-id
-                                :response/status :ok
-                                :model/response response})
-        response)
-      (catch Throwable failure
-        (append-session-event! session
-                               {:event/type :model/response
-                                :request/id request-id
-                                :response/status :error
-                                :error/category (:bbagent/error
-                                                 (ex-data failure))
-                                :error/message (.getMessage failure)
-                                :error/data (:error/data (ex-data failure))})
-        (throw failure)))))
+    (let [response
+          (try
+            (provider/complete (:provider session) request)
+            (catch Throwable failure
+              (append-session-event! session
+                                     {:event/type :model/response
+                                      :request/id request-id
+                                      :response/status :error
+                                      :error/category (:bbagent/error
+                                                       (ex-data failure))
+                                      :error/message (.getMessage failure)
+                                      :error/data (:error/data (ex-data failure))})
+              (throw failure)))]
+      (append-session-event! session
+                             {:event/type :model/response
+                              :request/id request-id
+                              :response/status :ok
+                              :model/response response})
+      response)))
 
 (defn record-action! [^AgentSession session action-id action-value]
   (append-session-event! session

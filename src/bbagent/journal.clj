@@ -71,7 +71,9 @@
 (defn- decode-line [line]
   (let [{:journal/keys [version event checksum] :as record}
         (edn/read-string {:readers {'bbagent/blob
-                                    #(tagged-literal 'bbagent/blob %)}} line)]
+                                    #(tagged-literal 'bbagent/blob %)}
+                          :default tagged-literal}
+                         line)]
     (when-not (= #{:journal/version :journal/event :journal/checksum}
                  (set (keys record)))
       (throw (ex-info "Malformed journal record" {})))
@@ -153,13 +155,14 @@
     (try
       (let [state @(:state journal)
             seq-number (inc (:next-seq state))
-            event (store/prepare-event (store/strip-secrets event) seq-number)]
+             event (store/prepare-event (store/strip-secrets event) seq-number)]
         (when (contains? (:ids state) (:event/id event))
           (throw (errors/error :journal-storage-failure
                                "Duplicate journal event ID"
                                {:event/id (:event/id event)})))
+        (store/validate-object-references! (blob-loader (:blobs journal)) event)
         (let [stored-event (store/externalize (blob-storer (:blobs journal))
-                                              event)
+                                               event)
               record {:journal/version 1
                       :journal/event stored-event
                       :journal/checksum
@@ -223,25 +226,79 @@
        (filter #(seq (read-events root %)))
        vec))
 
+(defn- global-blob-loader [root session-id]
+  (let [session-ids (cons session-id (remove #{session-id}
+                                              (list-sessions root)))]
+    (fn [digest]
+      (some (fn [candidate]
+              ((blob-loader (.resolve (session-path root candidate) "blobs"))
+               digest))
+            session-ids))))
+
+(defn- unresolved-effects-in [events]
+  (let [later-result?
+        (fn [request result-type]
+          (some (fn [event]
+                  (and (= result-type (:event/type event))
+                       (> (:event/seq event) (:event/seq request))
+                       (= (:request/id request) (:request/id event))
+                       (or (= :model/request (:event/type request))
+                           (= (:action/id request) (:action/id event)))))
+                events))]
+    (->> events
+         (keep (fn [event]
+                 (case (:event/type event)
+                   :model/request
+                   (when-not (later-result? event :model/response)
+                     {:effect/type :model
+                      :request/id (:request/id event)
+                      :event/id (:event/id event)
+                      :event/seq (:event/seq event)})
+
+                   :repl/request
+                   (when-not (later-result? event :repl/result)
+                     {:effect/type :repl
+                      :request/id (:request/id event)
+                      :action/id (:action/id event)
+                      :event/id (:event/id event)
+                      :event/seq (:event/seq event)})
+
+                   nil)))
+         vec)))
+
 (defrecord FileStore [root ^ConcurrentHashMap cache lock ids]
   store/EventStore
   (append-event! [_ session-id event]
     (locking lock
-      (when-not (keyword? (:event/type event))
-        (throw (errors/error :journal-storage-failure
-                             "Store event requires :event/type")))
-      (let [prepared (dissoc (store/prepare-event event 0) :event/seq)]
-        (when (contains? @ids (:event/id prepared))
+      (try
+        (when-not (keyword? (:event/type event))
           (throw (errors/error :journal-storage-failure
-                               "Duplicate journal event ID"
-                               {:event/id (:event/id prepared)})))
-        (let [stored (append! (session-handle root cache session-id) prepared)]
-          (swap! ids conj (:event/id stored))
-          stored))))
+                               "Store event requires :event/type")))
+        (let [prepared (dissoc (store/prepare-event (store/strip-secrets event) 0)
+                               :event/seq)]
+          (when (contains? @ids (:event/id prepared))
+            (throw (errors/error :journal-storage-failure
+                                 "Duplicate journal event ID"
+                                 {:event/id (:event/id prepared)})))
+          (let [journal (session-handle root cache session-id)
+                _ (store/validate-object-references!
+                   (global-blob-loader root session-id)
+                   (blob-storer (:blobs journal)) prepared)
+                stored (append! journal prepared)]
+            (swap! ids conj (:event/id stored))
+            stored))
+        (catch Throwable failure
+          (if (= :journal-storage-failure (:bbagent/error (ex-data failure)))
+            (throw failure)
+            (throw (errors/error :journal-storage-failure
+                                 "File store append failed"
+                                 {:root root :session/id session-id} failure)))))))
   (events [_ session-id]
     (locking lock (read-events root session-id)))
   (validate-session! [_ session-id]
     (locking lock (count (read-events root session-id))))
+  (unresolved-effects [_ session-id]
+    (locking lock (unresolved-effects-in (read-events root session-id))))
   (events-after [_ session-id event-id]
     (locking lock
       (let [scanned (read-events root session-id)
@@ -280,14 +337,9 @@
     (locking lock
       (safe-session-id! session-id)
       (let [hex (store/blob-hex digest)
-            session-ids (cons session-id (remove #{session-id}
-                                                  (list-sessions root)))
             ^String content
             (when (and hex (re-matches #"[0-9a-f]{64}" hex))
-              (some (fn [candidate]
-                      ((blob-loader (.resolve (session-path root candidate) "blobs"))
-                       hex))
-                    session-ids))]
+              ((global-blob-loader root session-id) hex))]
       (when (nil? content)
         (throw (errors/error :session-recovery-failure
                              "Store object is missing or malformed"

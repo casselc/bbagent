@@ -25,6 +25,8 @@
     "Returns the session's events in :event/seq order.")
   (validate-session! [store session-id]
     "Validates the complete immutable session history and returns its event count.")
+  (unresolved-effects [store session-id]
+    "Returns durable model or REPL requests with no later correlated result.")
   (events-after [store session-id event-id]
     "Returns the events stored after the event identified by event-id.
      Throws when the event ID is unknown to the session.")
@@ -170,6 +172,25 @@
     (list? value) (apply list (map #(hydrate load-blob %) value))
     (set? value) (set (map #(hydrate load-blob %) value))
     :else value))
+
+(defn- object-references [value]
+  (cond
+    (blob-reference? value) [value]
+    (map? value) (mapcat (comp object-references val) value)
+    (or (vector? value) (list? value) (set? value))
+    (mapcat object-references value)
+    :else []))
+
+(defn validate-object-references!
+  "Fails unless every caller-supplied #bbagent/blob reference resolves and verifies."
+  ([load-blob value]
+   (validate-object-references! load-blob (fn [_ _]) value))
+  ([load-blob on-reference value]
+   (doseq [reference (object-references value)]
+     (let [content (hydrate load-blob reference)
+           digest (blob-hex (:digest (:form reference)))]
+       (on-reference digest content)))
+   nil))
 
 (defn encode-payload
   "Encodes supported Clojure data as a canonical, order-independent
