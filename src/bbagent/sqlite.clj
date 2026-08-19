@@ -1,5 +1,7 @@
 (ns bbagent.sqlite
   (:require [bbagent.bb4t :as app-runtime]
+            [bbagent.coordinates :as coordinates]
+            [bbagent.errors :as errors]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs])
   (:import [java.nio.file Files LinkOption Path Paths]
@@ -9,23 +11,91 @@
 (def ^:private result-options
   {:builder-fn rs/as-unqualified-lower-maps})
 
+(def ^:private sqlite-sidecar-sha256
+  "f374da845a36d0a663521457f8e454413325e3b8247a15c2677426f4b15cf6ac")
+
+(def ^:private authority-negative-count 22)
+
 (defn- ensure! [condition message data]
   (when-not condition
     (throw (ex-info message data))))
 
+(defn- ensure-store! [condition message data]
+  (when-not condition
+    (throw (errors/error :journal-storage-failure message data))))
+
+(defn verify-native-sqlite-sidecar!
+  "In a native image, verifies and selects the executable-adjacent SQLite JNI
+   sidecar before sqlite-jdbc is loaded. On the JVM this is a no-op."
+  []
+  (when (= "runtime" (System/getProperty "org.graalvm.nativeimage.imagecode"))
+    (try
+      (let [^Class process-properties
+            (Class/forName "org.graalvm.nativeimage.ProcessProperties")
+            executable-name
+            (-> (.getMethod process-properties "getExecutableName"
+                            (make-array Class 0))
+                (.invoke nil (object-array 0)))
+            _ (ensure-store! (and (string? executable-name)
+                                  (not-empty executable-name))
+                             "Could not resolve native executable for SQLite sidecar"
+                             {})
+            ^Path executable
+            (.toRealPath (Paths/get ^String executable-name
+                                    (make-array String 0))
+                         (make-array LinkOption 0))
+            ^Path sidecar (.resolve (.getParent executable) "libsqlitejdbc.so")
+            _ (ensure-store!
+               (and (Files/isRegularFile sidecar (make-array LinkOption 0))
+                    (Files/isExecutable sidecar))
+               "SQLite native sidecar is not a regular executable file"
+               {:sidecar/path (str sidecar)})
+            actual (coordinates/sha-256-bytes (Files/readAllBytes sidecar))]
+        (ensure-store! (= sqlite-sidecar-sha256 actual)
+                       "SQLite native sidecar SHA-256 mismatch"
+                       {:sidecar/path (str sidecar)
+                        :sha256/expected sqlite-sidecar-sha256
+                        :sha256/actual actual})
+        (System/setProperty "org.sqlite.lib.path" (str (.getParent sidecar)))
+        (System/setProperty "org.sqlite.lib.name" (str (.getFileName sidecar)))
+        nil)
+      (catch clojure.lang.ExceptionInfo failure
+        (if (= :journal-storage-failure (:bbagent/error (ex-data failure)))
+          (throw failure)
+          (throw (errors/error :journal-storage-failure
+                               "Could not verify native SQLite sidecar" {}
+                               failure))))
+      (catch Throwable failure
+        (throw (errors/error :journal-storage-failure
+                             "Could not verify native SQLite sidecar" {}
+                             failure)))))
+  nil)
+
 (defn- database-path! [database]
-  (let [^Path input (Paths/get (str database) (make-array String 0))
-        ^Path absolute (.toAbsolutePath input)
-        ^Path path (.normalize absolute)
-        ^Path parent (.getParent path)]
-    (ensure! parent "SQLite database path must have a parent" {:database (str path)})
-    (ensure! (Files/isDirectory parent (make-array LinkOption 0))
-             "SQLite database parent must exist"
-             {:database (str path) :parent (str parent)})
-    (ensure! (not (Files/exists path (make-array LinkOption 0)))
-             "SQLite smoke database already exists"
-             {:database (str path)})
-    path))
+  (try
+    (let [^Path input (Paths/get (str database) (make-array String 0))
+          ^Path absolute (.toAbsolutePath input)
+          ^Path path (.normalize absolute)
+          ^Path parent (.getParent path)]
+      (ensure-store! parent "SQLite database path must have a parent"
+                     {:database (str path)})
+      (ensure-store! (Files/isDirectory parent (make-array LinkOption 0))
+                     "SQLite database parent must exist"
+                     {:database (str path) :parent (str parent)})
+      (ensure-store! (not (Files/exists path (make-array LinkOption 0)))
+                     "SQLite smoke database already exists"
+                     {:database (str path)})
+      path)
+    (catch clojure.lang.ExceptionInfo failure
+      (if (= :journal-storage-failure (:bbagent/error (ex-data failure)))
+        (throw failure)
+        (throw (errors/error :journal-storage-failure
+                             "Invalid SQLite database path"
+                             {:database (str database)} failure))))
+    (catch Throwable failure
+      (throw (errors/error :journal-storage-failure
+                           "Invalid SQLite database path"
+                           {:database (str database)} failure)))))
 
 (defn- open-connection [datasource]
   (let [started (System/nanoTime)
@@ -53,7 +123,8 @@
 (defn database-smoke!
   "Exercises file-backed SQLite from trusted host code and returns inert evidence."
   [database]
-  (let [^Path path (database-path! database)
+  (let [_ (verify-native-sqlite-sidecar!)
+        ^Path path (database-path! database)
         _ (Class/forName "org.sqlite.JDBC")
         datasource (jdbc/get-datasource (str "jdbc:sqlite:" path))
         first-open (open-connection datasource)
@@ -135,8 +206,10 @@
   (let [jdbc-url (str "jdbc:sqlite:" forbidden)]
     {"java.sql.DriverManager" "java.sql.DriverManager"
      "java.sql.Connection" "java.sql.Connection"
+     "java.sql.Date" "java.sql.Date"
      "java.sql.Statement" "java.sql.Statement"
      "java.sql.ResultSet" "java.sql.ResultSet"
+     "java.sql.Timestamp" "java.sql.Timestamp"
      "java.sql.DriverManager/getConnection"
      (str "(java.sql.DriverManager/getConnection " (pr-str jdbc-url) ")")
      "org.sqlite.JDBC" "org.sqlite.JDBC"
@@ -148,6 +221,9 @@
      "bbagent.sqlite/database-smoke!"
      (str "(bbagent.sqlite/database-smoke! " (pr-str (str forbidden)) ")")
      "bbagent.store/require" "(require '[bbagent.store :as store])"
+     "bbagent.journal/require" "(require '[bbagent.journal :as journal])"
+     "bbagent.journal/file-store"
+     (str "(bbagent.journal/file-store " (pr-str (str forbidden)) ")")
      "bbagent.storage/require" "(require '[bbagent.storage :as storage])"
      "bbagent.sqlite-store/require"
      "(require '[bbagent.sqlite-store :as sqlite-store])"
@@ -176,10 +252,13 @@
          :json-write (app-runtime/evaluate app "(data.json/write {\"ok\" true})")
          :project-read (app-runtime/evaluate app "(project/read \"README.md\")")}
         negatives (into (sorted-map)
-                        (map (fn [[probe source]]
-                               [probe (app-runtime/evaluate app source)]))
-                        (negative-sources forbidden))
+                         (map (fn [[probe source]]
+                                [probe (app-runtime/evaluate app source)]))
+                         (negative-sources forbidden))
         surface (:context/surface description)]
+    (ensure! (= authority-negative-count (count negatives))
+             "SQLite authority probe count changed"
+             {:expected authority-negative-count :actual (count negatives)})
     (ensure! (= app-runtime/context-spec (:context/spec description))
              "SQLite changed the bounded ContextSpec"
              {:context/spec (:context/spec description)})
@@ -214,6 +293,7 @@
      (into (sorted-map)
            (map (fn [[probe result]] [probe (:status result)]))
            positives)
+     :negative-probe/count (count negatives)
      :negative-probes
      (into (sorted-map)
            (map (fn [[probe result]]

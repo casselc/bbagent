@@ -60,5 +60,9 @@
     (is (= #{:error}
            (set (map :status (vals (:negative-probes result))))))
     (is (= #{:bb4t-evaluation-failure}
-           (set (map :error/category (vals (:negative-probes result))))))
+            (set (map :error/category (vals (:negative-probes result))))))
+    (is (= 22 (:negative-probe/count result)))
+    (is (every? #(contains? (:negative-probes result) %)
+                ["java.sql.Date" "java.sql.Timestamp"
+                 "bbagent.journal/require" "bbagent.journal/file-store"]))
     (is (false? (:forbidden-database/created? result)))))

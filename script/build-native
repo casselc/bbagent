@@ -142,6 +142,7 @@ TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" s0b-native-smoke \
   > "$BUILD_ROOT/s0b-resume.edn"
 if ! grep -Fq ':object/required? true' "$BUILD_ROOT/s0b-create.edn" || \
    ! grep -Fq ':object/verified? true' "$BUILD_ROOT/s0b-create.edn" || \
+   ! grep -Fq ':object/required? true' "$BUILD_ROOT/s0b-resume.edn" || \
    ! grep -Fq ':object/verified? true' "$BUILD_ROOT/s0b-resume.edn" || \
    ! grep -Fq ':value/data 70000' "$BUILD_ROOT/s0b-resume.edn"
 then
@@ -207,7 +208,10 @@ fi
 TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" s0a-sqlite-smoke \
   --database "$BUILD_ROOT/s0b-authority.db" --project "$S0B_PROJECT" \
   > "$BUILD_ROOT/s0b-authority.edn"
-if ! grep -Fq 'bbagent.storage/open!' "$BUILD_ROOT/s0b-authority.edn" || \
+if ! grep -Fq ':negative-probe/count 22' "$BUILD_ROOT/s0b-authority.edn" || \
+   ! grep -Fq 'java.sql.Date' "$BUILD_ROOT/s0b-authority.edn" || \
+   ! grep -Fq 'java.sql.Timestamp' "$BUILD_ROOT/s0b-authority.edn" || \
+   ! grep -Fq 'bbagent.journal/file-store' "$BUILD_ROOT/s0b-authority.edn" || \
    ! grep -Fq ':forbidden-database/created? false' "$BUILD_ROOT/s0b-authority.edn"
 then
   echo "S0b native authority evidence is incomplete" >&2
@@ -232,9 +236,31 @@ set +e
 MISSING_SIDECAR_EXIT=$?
 set -e
 mv "$RELOCATED/libsqlitejdbc.so.held" "$RELOCATED/libsqlitejdbc.so"
-if [ "$MISSING_SIDECAR_EXIT" -eq 0 ] || [ -e "$BUILD_ROOT/missing-sidecar.db" ]
+if [ "$MISSING_SIDECAR_EXIT" -eq 0 ] || \
+   [ -e "$BUILD_ROOT/missing-sidecar.db" ] || \
+   ! grep -Fq 'SQLite native sidecar is not a regular executable file' \
+     "$BUILD_ROOT/missing-sidecar.err"
 then
   echo "SQLite did not fail closed when its sidecar was absent" >&2
+  exit 1
+fi
+
+cp "$RELOCATED/libsqlitejdbc.so" "$RELOCATED/libsqlitejdbc.so.verified"
+printf '\0' >> "$RELOCATED/libsqlitejdbc.so"
+set +e
+"$RELOCATED/bbagent" s0a-sqlite-smoke \
+  --database "$BUILD_ROOT/mismatched-sidecar.db" \
+  --project "$SMOKE_PROJECT" > "$BUILD_ROOT/mismatched-sidecar.out" \
+  2> "$BUILD_ROOT/mismatched-sidecar.err"
+MISMATCHED_SIDECAR_EXIT=$?
+set -e
+mv "$RELOCATED/libsqlitejdbc.so.verified" "$RELOCATED/libsqlitejdbc.so"
+if [ "$MISMATCHED_SIDECAR_EXIT" -eq 0 ] || \
+   [ -e "$BUILD_ROOT/mismatched-sidecar.db" ] || \
+   ! grep -Fq 'SQLite native sidecar SHA-256 mismatch' \
+     "$BUILD_ROOT/mismatched-sidecar.err"
+then
+  echo "SQLite did not fail closed with an explicit sidecar digest diagnostic" >&2
   exit 1
 fi
 
@@ -247,6 +273,7 @@ fi
   printf 'sqlite_jdbc_jar_sha256=%s\n' "$SQLITE_JDBC_JAR_ACTUAL"
   printf 'next_jdbc_jar_sha256=%s\n' "$NEXT_JDBC_JAR_ACTUAL"
   printf 'missing_sidecar_exit=%s\n' "$MISSING_SIDECAR_EXIT"
+  printf 'mismatched_sidecar_exit=%s\n' "$MISMATCHED_SIDECAR_EXIT"
   printf 's0b_ambiguous_exit=%s\n' "$S0B_AMBIGUOUS_EXIT"
   printf 's0b_transaction_exit=%s\n' "$S0B_TRANSACTION_EXIT"
   sha256sum "$DIST_DIR/bbagent" "$DIST_DIR/libsqlitejdbc.so" \
@@ -259,6 +286,9 @@ fi
     "$BUILD_ROOT/s0b-transaction-exit.edn" \
     "$BUILD_ROOT/s0b-transaction-check.edn" \
     "$BUILD_ROOT/s0b-authority.edn" "$S0B_STATE/bbagent.sqlite3" \
+    "$BUILD_ROOT/missing-sidecar.out" "$BUILD_ROOT/missing-sidecar.err" \
+    "$BUILD_ROOT/mismatched-sidecar.out" \
+    "$BUILD_ROOT/mismatched-sidecar.err" \
     "$DIST_DIR/licenses/"*
   stat --format='%n %s bytes mode=%a' "$DIST_DIR/bbagent" \
     "$DIST_DIR/libsqlitejdbc.so" "$DIST_DIR/THIRD_PARTY_NOTICES.md" \

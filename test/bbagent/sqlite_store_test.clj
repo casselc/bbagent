@@ -21,6 +21,13 @@
 (defn- raw-connection [store]
   (jdbc/get-connection (jdbc/get-datasource (str "jdbc:sqlite:" (:path store)))))
 
+(defn- database-path [root]
+  (str (.resolve (Paths/get root (make-array String 0)) "bbagent.sqlite3")))
+
+(defn- open-database [root]
+  (jdbc/get-connection
+   (jdbc/get-datasource (str "jdbc:sqlite:" (database-path root)))))
+
 (defn- error-category [thunk]
   (try (thunk) nil
        (catch clojure.lang.ExceptionInfo failure
@@ -57,6 +64,47 @@
                   (jdbc/execute-one! connection ["PRAGMA user_version"]
                                      result-options))))))
     (store/close-store! store)))
+
+(deftest pre-existing-empty-database-is-accepted-test
+  (let [root (temp-root)]
+    (with-open [^java.sql.Connection connection (open-database root)]
+      (is (= 0 (:user_version
+                (jdbc/execute-one! connection ["PRAGMA user_version"]
+                                   result-options))))
+      (is (empty? (jdbc/execute! connection
+                                 ["SELECT name FROM main.sqlite_schema"]
+                                 result-options))))
+    (let [store (ss/sqlite-store root)]
+      (is (= 1 (:user_version
+                (jdbc/execute-one! (:connection store) ["PRAGMA user_version"]
+                                   result-options))))
+      (is (= "wal" (:journal-mode (ss/policy store))))
+      (store/close-store! store))))
+
+(deftest foreign-version-zero-database-is-rejected-without-mutation-test
+  (let [root (temp-root)]
+    (with-open [^java.sql.Connection connection (open-database root)]
+      (jdbc/execute-one! connection ["PRAGMA journal_mode = DELETE"])
+      (jdbc/execute-one! connection ["CREATE TABLE application_data (value TEXT)"])
+      (jdbc/execute-one! connection
+                         ["INSERT INTO application_data (value) VALUES (?)"
+                          "preserve me"])
+      (is (= 0 (:user_version
+                (jdbc/execute-one! connection ["PRAGMA user_version"]
+                                   result-options)))))
+    (is (= :journal-storage-failure
+           (error-category #(ss/sqlite-store root))))
+    (with-open [^java.sql.Connection connection (open-database root)]
+      (is (= 0 (:user_version
+                (jdbc/execute-one! connection ["PRAGMA user_version"]
+                                   result-options))))
+      (is (= "delete" (:journal_mode
+                        (jdbc/execute-one! connection ["PRAGMA journal_mode"]
+                                           result-options))))
+      (is (= [{:value "preserve me"}]
+             (jdbc/execute! connection
+                            ["SELECT value FROM application_data"]
+                            result-options))))))
 
 (deftest append-order-reopen-list-checkpoint-request-test
   (let [root (temp-root)
@@ -279,6 +327,28 @@
                                      WHERE name = 'doomed'"]
                                    result-options))))
       (is (= 1 (count (store/events store session-id)))))
+    (store/close-store! store)))
+
+(deftest failed-begin-does-not-rollback-existing-transaction-test
+  (let [root (temp-root)
+        store (ss/sqlite-store root)
+        ^java.sql.Connection connection (:connection store)]
+    (jdbc/execute-one! connection ["BEGIN IMMEDIATE"])
+    (try
+      (jdbc/execute-one! connection ["CREATE TABLE transaction_owner (id INTEGER)"])
+      (jdbc/execute-one! connection ["INSERT INTO transaction_owner (id) VALUES (7)"])
+      (is (thrown? java.sql.SQLException
+                   (ss/with-migration store (fn [_] :unreachable))))
+      (jdbc/execute-one! connection ["COMMIT"])
+      (catch Throwable failure
+        (try
+          (jdbc/execute-one! connection ["ROLLBACK"])
+          (catch Throwable rollback-failure
+            (.addSuppressed failure rollback-failure)))
+        (throw failure)))
+    (is (= [{:id 7}]
+           (jdbc/execute! connection ["SELECT id FROM transaction_owner"]
+                          result-options)))
     (store/close-store! store)))
 
 (deftest close-behavior-test

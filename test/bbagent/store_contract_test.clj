@@ -287,6 +287,23 @@
                                           :content dangling}))))
            (is (= 2 (count (store/events store "delta-session"))))))
 
+       (testing "blob-shaped map keys and foreign tagged forms are opaque"
+         (let [dangling (tagged-literal
+                         'bbagent/blob
+                         {:digest (str "sha256:" (apply str (repeat 64 "0")))
+                          :bytes 7
+                          :encoding :utf-8})
+               foreign (tagged-literal 'contract/opaque {:dangling dangling})
+               opaque-event {:event/type :contract/opaque
+                             :event/id "evt-d-04"
+                             :event/time "2026-01-03T00:00:05Z"
+                             :map-with-blob-key {dangling :kept}
+                             :foreign-tag foreign}
+               stored (store/append-event! store "delta-session" opaque-event)]
+           (is (= opaque-event (dissoc stored :event/seq)))
+           (is (= (assoc opaque-event :event/seq 3)
+                  (peek (store/events store "delta-session"))))))
+
        (testing "objects alone do not create a logical session"
          (store/put-object! store "object-only" "unreferenced object")
          (is (not (some #{"object-only"} (store/list-sessions store)))))
@@ -398,7 +415,7 @@
                   :alpha-final 8
                   :auto 2
                   :sigma 1
-                   :delta 2
+                   :delta 3
                   :bravo 1
                   :absent 0}
          :objects {:small {:digest small-digest

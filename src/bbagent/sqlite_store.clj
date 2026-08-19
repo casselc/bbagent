@@ -10,6 +10,7 @@
    backend reproduces the A0 journal's semantic event contract."
   (:require [bbagent.coordinates :as coordinates]
             [bbagent.errors :as errors]
+            [bbagent.sqlite :as sqlite]
             [bbagent.store :as store]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs])
@@ -44,22 +45,22 @@
   (errors/error :session-recovery-failure
                 "SQLite session integrity check failed" {} failure))
 
-(defn- run-transaction!
-  "Runs f (a function of the java.sql.Connection) inside an explicit
-   transaction.  On failure rolls back and rethrows, leaving prior
-   user_version and data usable."
+(defn- run-immediate-transaction!
+  "Runs f inside an owned BEGIN IMMEDIATE transaction.  Acquisition is
+   deliberately outside the body/commit try: a failed BEGIN must not roll
+   back a transaction owned by another caller."
   [^Connection connection f]
-  (let [auto (.getAutoCommit connection)]
-    (try
-      (.setAutoCommit connection false)
-      (let [result (f connection)]
-        (.commit connection)
-        result)
-      (catch Throwable failure
-        (.rollback connection)
-        (throw failure))
-      (finally
-        (.setAutoCommit connection auto)))))
+  (jdbc/execute-one! connection ["BEGIN IMMEDIATE"])
+  (try
+    (let [result (f connection)]
+      (jdbc/execute-one! connection ["COMMIT"])
+      result)
+    (catch Throwable failure
+      (try
+        (jdbc/execute-one! connection ["ROLLBACK"])
+        (catch Throwable rollback-failure
+          (.addSuppressed failure rollback-failure)))
+      (throw failure))))
 
 (defn with-migration
   "Runs migration-fn (a function of the java.sql.Connection) inside an
@@ -69,12 +70,41 @@
   [store migration-fn]
   (locking (:lock store)
     (ensure-open! store)
-    (run-transaction! (:connection store) migration-fn)))
+    (run-immediate-transaction! (:connection store) migration-fn)))
 
 (defn- create-schema! [^Connection connection]
   (doseq [statement schema-statements]
     (jdbc/execute-one! connection [statement]))
   (jdbc/execute-one! connection [(str "PRAGMA user_version = " schema-version)]))
+
+(defn- schema-version-of [^Connection connection]
+  (:user_version
+   (jdbc/execute-one! connection ["PRAGMA user_version"] result-options)))
+
+(defn- unsupported-schema! [version]
+  (throw (errors/error :journal-storage-failure
+                       "Unsupported SQLite schema version"
+                       {:user_version version})))
+
+(defn- initialize-schema! [^Connection connection]
+  (run-immediate-transaction!
+   connection
+   (fn [connection]
+     (let [version (schema-version-of connection)
+           schema-objects (jdbc/execute!
+                           connection
+                           ["SELECT type, name, tbl_name
+                             FROM main.sqlite_schema ORDER BY type, name"]
+                           result-options)]
+       (cond
+         (= schema-version version) nil
+         (not= 0 version) (unsupported-schema! version)
+         (seq schema-objects)
+         (throw (errors/error :journal-storage-failure
+                              "Foreign SQLite schema has version zero"
+                              {:user_version version
+                               :schema-objects schema-objects}))
+         :else (create-schema! connection))))))
 
 (defn- apply-pragmas! [^Connection connection]
   (jdbc/execute-one! connection ["PRAGMA journal_mode = WAL"])
@@ -114,7 +144,8 @@
    the state root directories and the fresh schema when needed.  Applies and
    verifies the conservative SQLite durability policy."
   [state-root]
-  (let [^Path root (state-root-path state-root)
+  (let [_ (sqlite/verify-native-sqlite-sidecar!)
+        ^Path root (state-root-path state-root)
         ^Path db-path (.resolve root "bbagent.sqlite3")
         _ (Class/forName "org.sqlite.JDBC")
         datasource (jdbc/get-datasource (str "jdbc:sqlite:" db-path))
@@ -122,16 +153,12 @@
         lock (Object.)
         closed? (atom false)]
     (try
-      (let [version (:user_version
-                     (jdbc/execute-one! connection ["PRAGMA user_version"]
-                                         result-options))
+      (let [version (schema-version-of connection)
             _ (when-not (#{0 schema-version} version)
-                (throw (errors/error :journal-storage-failure
-                                     "Unsupported SQLite schema version"
-                                     {:user_version version})))
+                (unsupported-schema! version))
+            _ (when (= 0 version)
+                (initialize-schema! connection))
             policy (apply-pragmas! connection)]
-        (when (= 0 version)
-          (run-transaction! connection create-schema!))
         (->SqliteStore connection lock closed? policy (str db-path)))
       (catch Throwable failure
         (.close connection)
@@ -237,39 +264,38 @@
     (store/validate-session-id! session-id)
     (let [^Connection connection (:connection store)]
       (try
-        (jdbc/execute-one! connection ["BEGIN IMMEDIATE"])
-        (let [max-row (jdbc/execute-one!
-                       connection
-                       ["SELECT COALESCE(MAX(seq), 0) AS max_seq
-                         FROM event WHERE session_id = ?" session-id]
-                       result-options)
-               seq-number (inc (:max_seq max-row))
-               prepared (store/prepare-event (store/strip-secrets event)
-                                             seq-number)
-               _ (store/validate-object-references! (object-loader connection)
-                                                     prepared)
-               stored-event (store/externalize (object-storer connection)
-                                               prepared)
-              payload (store/encode-payload stored-event)
-              checksum (store/semantic-checksum stored-event)]
-          (jdbc/execute-one!
-           connection
-           ["INSERT INTO event (session_id, seq, event_id, event_type,
-                                event_time, request_id, action_id,
-                                payload, checksum)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            session-id seq-number (:event/id stored-event)
-             (keyword-string (:event/type stored-event))
-            (:event/time stored-event)
-            (:request/id stored-event)
-            (:action/id stored-event)
-            (.getBytes payload StandardCharsets/UTF_8)
-            checksum])
-          (jdbc/execute-one! connection ["COMMIT"])
-          prepared)
+        (run-immediate-transaction!
+         connection
+         (fn [connection]
+           (let [max-row (jdbc/execute-one!
+                          connection
+                          ["SELECT COALESCE(MAX(seq), 0) AS max_seq
+                            FROM event WHERE session_id = ?" session-id]
+                          result-options)
+                 seq-number (inc (:max_seq max-row))
+                 prepared (store/prepare-event (store/strip-secrets event)
+                                               seq-number)
+                 _ (store/validate-object-references! (object-loader connection)
+                                                       prepared)
+                 stored-event (store/externalize (object-storer connection)
+                                                 prepared)
+                 payload (store/encode-payload stored-event)
+                 checksum (store/semantic-checksum stored-event)]
+             (jdbc/execute-one!
+              connection
+              ["INSERT INTO event (session_id, seq, event_id, event_type,
+                                   event_time, request_id, action_id,
+                                   payload, checksum)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+               session-id seq-number (:event/id stored-event)
+               (keyword-string (:event/type stored-event))
+               (:event/time stored-event)
+               (:request/id stored-event)
+               (:action/id stored-event)
+               (.getBytes payload StandardCharsets/UTF_8)
+               checksum])
+             prepared)))
         (catch Throwable failure
-          (try (jdbc/execute-one! connection ["ROLLBACK"])
-               (catch Throwable _ nil))
           (throw (classify-write failure)))))))
 
 (defn events [store session-id]
@@ -457,9 +483,16 @@
     (when-not (string? value)
       (throw (errors/error :journal-storage-failure
                            "Store objects must be strings")))
-    (run-transaction! (:connection store)
-                      (fn [^Connection connection]
-                        (store/store-string (object-storer connection) value)))))
+    (try
+      (run-immediate-transaction!
+       (:connection store)
+       (fn [^Connection connection]
+         (store/store-string (object-storer connection) value)))
+      (catch Throwable failure
+        (if (= :journal-storage-failure (:bbagent/error (ex-data failure)))
+          (throw failure)
+          (throw (errors/error :journal-storage-failure
+                               "SQLite object put failed" {} failure)))))))
 
 (defn get-object [store session-id digest]
   (locking (:lock store)

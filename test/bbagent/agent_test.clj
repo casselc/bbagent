@@ -207,6 +207,8 @@
                               :request/id request-id
                               :action/id action-id
                               :repl/result result})
+        ((:unsubscribe first-session))
+        (store/close-store! (:store first-session))
         (let [second-session
               (session/resume!
                {:state-root state-root
@@ -231,9 +233,7 @@
                         (filter #(= :repl/result (:event/type %)))
                         last :repl/result :evaluation :value :value/data)))
             (finally
-              (session/close! second-session :test-end)
-              ((:unsubscribe first-session))
-              (store/close-store! (:store first-session)))))))))
+              (session/close! second-session :test-end))))))))
 
 (deftest unresolved-tail-request-fails-recovery-test
   (doseq [backend backends]

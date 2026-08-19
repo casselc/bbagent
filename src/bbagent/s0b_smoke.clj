@@ -113,8 +113,6 @@
           :run/id (:run-id agent-session)
           :stage :request-intent-durable})
     (flush)
-    ((:unsubscribe agent-session))
-    (store/close-store! (:store agent-session))
     (.halt (Runtime/getRuntime) 73)))
 
 (defn ambiguous-check! [{:keys [state-root session-id]}]

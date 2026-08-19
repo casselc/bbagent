@@ -12,6 +12,13 @@
         "bbagent-journal-test"
         (make-array java.nio.file.attribute.FileAttribute 0))))
 
+(defn- error-category [thunk]
+  (try
+    (thunk)
+    nil
+    (catch clojure.lang.ExceptionInfo failure
+      (:bbagent/error (ex-data failure)))))
+
 (deftest session-path-containment-test
   (let [root (temp-root)]
     (doseq [session-id ["." ".." "../foo" "foo/../bar"]]
@@ -126,7 +133,137 @@
     (is (= [session-id] (store/list-sessions fs)))
     (is (nil? (store/close-store! fs)))
     (is (nil? (store/close-store! fs)))
-    (is (= 3 (count (store/events fs session-id))))))
+    (is (= :journal-storage-failure
+           (error-category #(store/events fs session-id))))))
+
+(deftest corrupt-session-is-isolated-from-open-list-and-healthy-read-test
+  (let [root (temp-root)
+        healthy (journal/open! root "healthy")
+        corrupt (journal/open! root "corrupt")]
+    (journal/append! healthy {:event/type :session/started})
+    (journal/append! corrupt {:event/type :session/started})
+    (Files/write (:path corrupt)
+                 (.getBytes "{:malformed true}\n" StandardCharsets/UTF_8)
+                 (into-array OpenOption [StandardOpenOption/APPEND]))
+    (let [fs (journal/file-store root)]
+      (try
+        (is (= ["corrupt" "healthy"] (store/list-sessions fs)))
+        (is (= [:session/started]
+               (mapv :event/type (store/events fs "healthy"))))
+        (is (= :session-recovery-failure
+               (error-category #(store/events fs "corrupt"))))
+        (is (= 1 (store/validate-session! fs "healthy")))
+        (finally
+          (store/close-store! fs))))))
+
+(deftest file-store-reads-use-recovered-session-cache-test
+  (let [root (temp-root)
+        session-id "cached-session"
+        handle (journal/open! root session-id)
+        original-recover journal/recover
+        recoveries (atom 0)]
+    (journal/append! handle {:event/type :session/started})
+    (with-redefs [journal/recover (fn [path]
+                                   (swap! recoveries inc)
+                                   (original-recover path))]
+      (let [fs (journal/file-store root)]
+        (try
+          (is (= 0 @recoveries))
+          (is (= 1 (count (store/events fs session-id))))
+          (is (= 1 (store/validate-session! fs session-id)))
+          (is (= :session/started
+                 (:event/type (store/first-event fs session-id
+                                                 :session/started))))
+          (is (= [] (store/unresolved-effects fs session-id)))
+          (is (= 1 @recoveries))
+          (finally
+            (store/close-store! fs)))))))
+
+(deftest corrupt-root-audit-blocks-appends-but-not-reads-test
+  (let [root (temp-root)
+        healthy (journal/open! root "healthy")
+        corrupt (journal/open! root "corrupt")]
+    (journal/append! healthy {:event/type :session/started})
+    (journal/append! corrupt {:event/type :session/started})
+    (Files/write (:path corrupt)
+                 (.getBytes "{:malformed true}\n" StandardCharsets/UTF_8)
+                 (into-array OpenOption [StandardOpenOption/APPEND]))
+    (let [fs (journal/file-store root)]
+      (try
+        (is (= 1 (count (store/events fs "healthy"))))
+        (is (= :journal-storage-failure
+               (error-category
+                #(store/append-event! fs "healthy"
+                                      {:event/type :user/message}))))
+        (is (= 1 (count (store/events fs "healthy"))))
+        (is (= ["corrupt" "healthy"] (store/list-sessions fs)))
+        (finally
+          (store/close-store! fs))))))
+
+(deftest root-audit-rejects-cross-session-event-id-duplicates-test
+  (let [root (temp-root)
+        duplicate-id "duplicate-across-sessions"
+        first-handle (journal/open! root "first")
+        second-handle (journal/open! root "second")]
+    (journal/append! first-handle {:event/id duplicate-id
+                                   :event/type :session/started})
+    (journal/append! second-handle {:event/id duplicate-id
+                                    :event/type :session/started})
+    (let [fs (journal/file-store root)]
+      (try
+        (is (= 1 (count (store/events fs "first"))))
+        (is (= 1 (count (store/events fs "second"))))
+        (is (= :journal-storage-failure
+               (error-category
+                #(store/append-event! fs "first"
+                                      {:event/type :user/message}))))
+        (finally
+          (store/close-store! fs))))))
+
+(deftest file-store-exclusive-lock-close-and-reopen-test
+  (let [root (temp-root)
+        fs (journal/file-store root)]
+    (is (= :journal-storage-failure
+           (error-category #(journal/file-store root))))
+    (is (nil? (store/close-store! fs)))
+    (is (nil? (store/close-store! fs)))
+    (doseq [operation [#(store/append-event! fs "closed" {:event/type :test})
+                       #(store/events fs "closed")
+                       #(store/validate-session! fs "closed")
+                       #(store/unresolved-effects fs "closed")
+                       #(store/events-after fs "closed" "event")
+                       #(store/first-event fs "closed" :test)
+                       #(store/latest-checkpoint fs "closed")
+                       #(store/request-event fs "closed" "request")
+                       #(store/list-sessions fs)
+                       #(store/put-object! fs "closed" "value")
+                       #(store/get-object fs "closed" (str "sha256:"
+                                                          (apply str
+                                                                 (repeat 64 "0"))))]]
+      (is (= :journal-storage-failure (error-category operation))))
+    (let [reopened (journal/file-store root)]
+      (try
+        (is (= [] (store/list-sessions reopened)))
+        (finally
+          (store/close-store! reopened))))))
+
+(deftest list-sessions-is-metadata-only-and-excludes-object-only-dirs-test
+  (let [root (temp-root)
+        event-handle (journal/open! root "event-session")
+        _empty-handle (journal/open! root "empty-journal")
+        torn-handle (journal/open! root "torn-first-record")]
+    (journal/append! event-handle {:event/type :session/started})
+    (Files/write (:path torn-handle)
+                 (.getBytes "{:journal/version 1" StandardCharsets/UTF_8)
+                 (into-array OpenOption [StandardOpenOption/CREATE]))
+    (let [fs (journal/file-store root)]
+      (try
+        (store/put-object! fs "object-only" "payload")
+        (is (= ["event-session"] (store/list-sessions fs)))
+        (is (= [] (store/events fs "torn-first-record")))
+        (is (= ["event-session"] (store/list-sessions fs)))
+        (finally
+          (store/close-store! fs))))))
 
 (deftest duplicate-event-id-rejection-test
   (let [root (temp-root)
