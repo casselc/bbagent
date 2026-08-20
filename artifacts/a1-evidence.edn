@@ -5,7 +5,7 @@
 
  :coordinates
  {:bb4t "0ca6addef70278189aefa73df940dee0e9e607b4"
-  :bbagent "7ba6add7ea41cee505b4f6f830868872b8358b2e"
+  :bbagent "991517c870ed8aaba8c7520b00f5620ee7169cdb"
   :bb4t/base-tag "bb4t-s0a"
   :bbagent/base-tag "bbagent-s0b"
   :application/profile :app/bbagent}
@@ -31,7 +31,7 @@
  :artifacts
  {"dist/bbagent"
   {:bytes 74844416
-   :sha256 "ad20e3fb49b9f2bae741629452d64f5ddd92c215a510c45d938fbb260baf4ae0"}
+   :sha256 "e5af878aec12b3c45deecb13f317b0d14b40fcfc6a481d8b509ea39841b7416e"}
   "dist/libsqlitejdbc.so"
   {:bytes 1093888
    :sha256 "f374da845a36d0a663521457f8e454413325e3b8247a15c2677426f4b15cf6ac"}}
@@ -92,12 +92,15 @@
           :session-browser :pass
           :operator-repl-mode :pass
           :bounded-evaluation :pass
+          :operator-def :pass
           :clean-exit-with-checkpoint :pass
           :sessions-listed :pass
           :resume-starts :pass
           :resume-same-session :pass
           :resume-capabilities :pass
+          :operator-state-survives-resume :pass
           :resume-clean-exit :pass}
+  :gate/count 17
   :result :pass}
 
  :defects-found-and-fixed
@@ -112,12 +115,26 @@
    :found-by :native-tui-proof
    :fixed-in "7ba6add7ea41cee505b4f6f830868872b8358b2e"}]
 
- :jvm-tests {:tests 94 :assertions 737 :failures 0 :errors 0}
+ :review-fixes
+ [{:defect "operator REPL evaluations were not journaled"
+   :severity :correctness
+   :cause "the operator REPL shares the model's bounded Context, so an operator definition a later journaled agent form depended on was never reconstructed on resume"
+   :effect "resume could fail its status-equivalence check for a form that had recorded :ok"
+   :fix "session/operator-evaluate! writes a durable :repl/request before evaluating and a :repl/result after, tagged :repl/origin :operator"
+   :recovery "every durable REPL evaluation joins the replay program; only agent-origin evaluations reconstruct conversation turns"
+   :compatibility "absent :repl/origin means :agent, so existing journals keep their meaning"
+   :proven-by [:jvm-tests :native-tui-proof]}
+  {:defect "the event pane's first read was not bounded at the storage layer"
+   :severity :efficiency
+   :cause "it read the complete session and trimmed, decoding and hydrating all history to show the newest events"
+   :fix "store/recent-events; SQLite orders by seq descending with a limit and restores ascending order, the file backend trims its recovered cache"
+   :scope "query capability only; durable semantics unchanged"}]
+
+ :jvm-tests {:tests 99 :assertions 759 :failures 0 :errors 0}
 
  :nonclaims
  ["no live-provider TUI session was run in this evidence"
   "no dogfood session yet"
   "Linux x86_64 glibc only; no cross-platform or static-linking claim"
-  "the operator REPL is not journaled and is not replayed on resume"
   "durable checkpoint semantics are unchanged; long-session debt is untouched"
   "build used local repository clones at the recorded SHAs rather than the public remotes"]}

@@ -116,6 +116,13 @@ def run(dist, state_root, project_root):
     s.send(b"(+ 1 2)\r", settle=4.0)  # bounded evaluation
     gates["bounded_eval"] = ":ok" in plain(bytes(s.out[mark:]))
 
+    # Operator and model share one bounded Context, so an operator definition
+    # must be journaled and reconstructed on resume.  Define it here and read
+    # it back in the second process below.
+    mark = len(s.out)
+    s.send(b"(def native-operator-value 41)\r", settle=4.0)
+    gates["operator_def"] = ":ok" in plain(bytes(s.out[mark:]))
+
     s.send(b"\x11", settle=3.0)  # Ctrl-Q: checkpoint and quit
     code = s.wait()
     gates["clean_exit"] = code == 0
@@ -143,6 +150,15 @@ def run(dist, state_root, project_root):
         gates["resume_starts"] = "bbagent" in resumed
         gates["resume_same_session"] = target[:8] in resumed
         gates["resume_capabilities"] = "project/read" in resumed
+        # Prove the operator definition survived into the rebuilt Context.
+        s2.send(b"\x14", settle=1.5)  # Ctrl-T: operator repl mode
+        mark2 = len(s2.out)
+        s2.send(b"(+ native-operator-value 1)\r", settle=5.0)
+        after = plain(bytes(s2.out[mark2:]))
+        gates["operator_state_survives_resume"] = (
+            ":ok" in after and ":error" not in after
+        )
+
         s2.send(b"\x11", settle=3.0)
         gates["resume_clean_exit"] = s2.wait() == 0
     else:
