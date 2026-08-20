@@ -7,6 +7,7 @@
              [bbagent.sqlite-store-test]
              [bbagent.sqlite-test]
              [bbagent.store-contract-test]
+             [bbagent.tui-test]
              [clojure.test :as test])
   (:gen-class))
 
@@ -19,6 +20,7 @@
                         'bbagent.provider-test
                         'bbagent.sqlite-store-test
                         'bbagent.sqlite-test
-                        'bbagent.store-contract-test)]
+                        'bbagent.store-contract-test
+                        'bbagent.tui-test)]
     (when (pos? (+ fail error))
       (System/exit 1))))

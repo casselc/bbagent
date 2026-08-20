@@ -61,8 +61,17 @@
            (set (map :status (vals (:negative-probes result))))))
     (is (= #{:bb4t-evaluation-failure}
             (set (map :error/category (vals (:negative-probes result))))))
-    (is (= 22 (:negative-probe/count result)))
+    (is (= 35 (:negative-probe/count result)))
     (is (every? #(contains? (:negative-probes result) %)
                 ["java.sql.Date" "java.sql.Timestamp"
                  "bbagent.journal/require" "bbagent.journal/file-store"]))
+    (testing "compiling a TUI into the image does not widen model authority"
+      (is (every? #(contains? (:negative-probes result) %)
+                  ["org.jline.terminal.Terminal"
+                   "org.jline.terminal.TerminalBuilder/terminal"
+                   "org.jline.keymap.KeyMap"
+                   "charm.program/require"
+                   "charm.terminal/create-terminal"
+                   "bbagent.tui.app/require"
+                   "bbagent.tui.command/start-worker!"])))
     (is (false? (:forbidden-database/created? result)))))

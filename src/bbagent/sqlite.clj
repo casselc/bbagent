@@ -14,7 +14,7 @@
 (def ^:private sqlite-sidecar-sha256
   "f374da845a36d0a663521457f8e454413325e3b8247a15c2677426f4b15cf6ac")
 
-(def ^:private authority-negative-count 22)
+(def ^:private authority-negative-count 35)
 
 (defn- ensure! [condition message data]
   (when-not condition
@@ -234,7 +234,27 @@
      "bbagent.s0b-smoke/require" "(require '[bbagent.s0b-smoke :as smoke])"
      "bbagent.s0b-smoke/transaction-check!"
      (str "(bbagent.s0b-smoke/transaction-check! {:state-root "
-          (pr-str (str forbidden)) " :session-id \"forbidden\"})")}))
+          (pr-str (str forbidden)) " :session-id \"forbidden\"})")
+
+     ;; A1: the image now compiles a TUI.  The model Context must not
+     ;; inherit terminal, JLine, charm, or TUI-adapter authority, and must
+     ;; not obtain a terminal handle, a worker, or a UI callback.
+     "org.jline.terminal.Terminal" "org.jline.terminal.Terminal"
+     "org.jline.terminal.TerminalBuilder" "org.jline.terminal.TerminalBuilder"
+     "org.jline.terminal.TerminalBuilder/terminal"
+     "(org.jline.terminal.TerminalBuilder/terminal)"
+     "org.jline.utils.InfoCmp$Capability" "org.jline.utils.InfoCmp$Capability"
+     "org.jline.keymap.KeyMap" "org.jline.keymap.KeyMap"
+     "org.jline.reader.LineReader" "org.jline.reader.LineReader"
+     "charm.program/require" "(require '[charm.program :as program])"
+     "charm.terminal/require" "(require '[charm.terminal :as terminal])"
+     "charm.terminal/create-terminal" "(charm.terminal/create-terminal)"
+     "bbagent.tui.app/require" "(require '[bbagent.tui.app :as tui])"
+     "bbagent.tui.command/require"
+     "(require '[bbagent.tui.command :as tui-command])"
+     "bbagent.tui.command/start-worker!"
+     "(bbagent.tui.command/start-worker! {})"
+     "bbagent.tui.state/require" "(require '[bbagent.tui.state :as tui-state])"}))
 
 (defn authority-smoke!
   "Proves the actual A0 Context remains unchanged despite trusted SQLite reachability."

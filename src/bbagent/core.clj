@@ -6,6 +6,7 @@
             [bbagent.sqlite :as sqlite]
             [bbagent.storage :as storage]
             [bbagent.store :as store]
+            [bbagent.tui.app :as tui]
             [clojure.java.io :as io]
             [clojure.string :as str])
   (:gen-class))
@@ -79,6 +80,37 @@
                 (println (pr-str {:error (:bbagent/error (ex-data failure))
                                   :message (.getMessage failure)})))))
           (recur))))))
+
+(defn- tui-command
+  "Opens or resumes a session through the ordinary application seams and
+   hands the live AgentSession to the TUI.  The TUI never opens a store or
+   constructs a Context itself."
+  [options]
+  (let [backend (:store options)
+        session-id (first (:arguments options))
+        agent-session
+        (if session-id
+          (let [root-store (storage/open! (state-root options) backend)
+                start (try
+                        (store/first-event root-store session-id :session/started)
+                        (finally (store/close-store! root-store)))]
+            (session/resume! {:state-root (state-root options)
+                              :session-id session-id
+                              :model-provider (model-provider
+                                               options (:provider/config start))
+                              :system-prompt (system-prompt options)
+                              :store-backend backend}))
+          (session/start! {:state-root (state-root options)
+                           :project-root (or (:project options) ".")
+                           :model-provider (model-provider options nil)
+                           :system-prompt (system-prompt options)
+                           :store-backend backend}))]
+    (try
+      (tui/start!
+       {:agent-session agent-session
+        :store-backend (storage/backend backend)
+        :state-root (state-root options)})
+      (finally (session/close! agent-session :operator-exit)))))
 
 (defn- run-command [options]
   (let [agent-session
@@ -172,7 +204,8 @@
       (throw (ex-info "S0b smoke requires a known --phase" {:phase phase})))))
 
 (defn- usage []
-  (str "bbagent run [--project PATH] [--store file|sqlite] [provider options]\n"
+  (str "bbagent tui [SESSION_ID] [--project PATH] [--store file|sqlite]\n"
+       "bbagent run [--project PATH] [--store file|sqlite] [provider options]\n"
        "bbagent resume SESSION_ID [--store file|sqlite] [provider options]\n"
        "bbagent sessions [--state PATH] [--store file|sqlite]\n"
         "bbagent inspect SESSION_ID [--state PATH] [--store file|sqlite]\n"
@@ -191,6 +224,7 @@
         positional (:arguments options)]
     (case command
       "run" (run-command options)
+      "tui" (tui-command options)
       "resume" (if-let [session-id (first positional)]
                  (resume-command session-id options)
                  (throw (ex-info "resume requires a session ID" {})))
