@@ -132,9 +132,39 @@
 
  :jvm-tests {:tests 99 :assertions 759 :failures 0 :errors 0}
 
+ :dogfood
+ {:endpoint "OpenAI-compatible loopback, Lemonade"
+  :model "Qwen3.6-27B-MTP-GGUF"
+  :scenario-a
+  {:prompt "Read README.md and src/example/core.clj and explain this project; retain the README with def"
+   :result :pass
+   :turn/seconds 32.1
+   :repl/forms 4
+   :repl/statuses {:ok 4}
+   :resume/seconds 2.1
+   :resume-turn/seconds 20.2
+   :resume/answer-correct? true
+   :journal/events 56
+   :journal/sha256 "889dcd36478ad89b8c94803a47001704c18d20afe6abf1cc5ab4bd9867a64b52"
+   :journal/secrets-found 0
+   :exit-codes [0 0]}
+  :scenario-b
+  {:prompt "What files does this project contain, and what does each one do?"
+   :result :fail
+   :failure :agent-invalid-action
+   :failure/message "Agent exceeded the A0 action limit"
+   :repl/attempts 12
+   :repl/statuses {:error 11 :ok 1}
+   :journal/events 93
+   :guessed-vars ["project/contents" "dir" "find-doc" "clojure-version"
+                  "clojure.java.io" "sci.api" "project" "require project"]
+   :discovery-vars-tried []
+   :note "reproduces the A0 orientation failure; the capability pane is human-facing and cannot reach the model"}
+  :discovery-surface-verified-natively
+  {"(apropos \"\")" :ok "(doc project/read)" :ok
+   :note "both already granted; the system prompt never mentions them"}}
+
  :nonclaims
- ["no live-provider TUI session was run in this evidence"
-  "no dogfood session yet"
-  "Linux x86_64 glibc only; no cross-platform or static-linking claim"
+ ["Linux x86_64 glibc only; no cross-platform or static-linking claim"
   "durable checkpoint semantics are unchanged; long-session debt is untouched"
   "build used local repository clones at the recorded SHAs rather than the public remotes"]}

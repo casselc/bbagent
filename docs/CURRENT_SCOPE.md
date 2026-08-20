@@ -1,6 +1,10 @@
 # Current Scope: A1
 
-**Milestone status:** A0 PASS, S0a PASS, S0b PASS, A1 ACTIVE.
+**Milestone status:** A0 PASS, S0a PASS, S0b PASS, A1 PASS pending fresh review.
+
+A1 findings are in `docs/A1_FINDINGS.md`. The recommended next milestone is a
+small capability-orientation change before A2; see that document's section 14.
+Do not begin it without review.
 
 A1 asks whether a native interactive TUI can become the preferred human/operator
 interface to bbagent while remaining only a projection and controller over the
