@@ -36,6 +36,12 @@
     "Returns the most recent :session/checkpoint event, or nil.")
   (request-event [store session-id request-id]
     "Returns the earliest :repl/request carrying the request ID, or nil.")
+  (recent-events [store session-id limit]
+    "Returns at most limit most-recent events, in ascending :event/seq
+     order.  This is a bounded query, not a whole-history read followed by a
+     trim: a backend must not decode or hydrate the complete session merely
+     to answer it.  Used for a view's first read, after which events-after
+     is strictly incremental.")
   (list-sessions [store]
     "Returns the sorted session IDs present in the store."))
 

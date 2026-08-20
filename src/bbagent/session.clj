@@ -143,6 +143,7 @@
          :repl/result
          (let [request (or (get requests (:request/id event))
                            (request-event (:request/id event)))
+               operator? (= :operator (:repl/origin request))
                 _ (when-not (= :repl/request (:event/type request))
                     (throw (errors/error
                             :session-recovery-failure
@@ -155,6 +156,13 @@
                             {:request/id (:request/id event)
                              :request/action-id (:action/id request)
                              :result/action-id (:action/id event)})))
+                _ (when-not (= (:repl/origin request) (:repl/origin event))
+                    (throw (errors/error
+                            :session-recovery-failure
+                            "A durable REPL result has mismatched origin"
+                            {:request/id (:request/id event)
+                             :request/origin (:repl/origin request)
+                             :result/origin (:repl/origin event)})))
                action-id (:action/id event)
                result (:repl/result event)
                assistant-message
@@ -165,17 +173,24 @@
                                :action/value
                                {:action/type :repl/eval
                                 :source (:repl/source request)}}]})]
-           (-> state
-               (assoc :messages
-                      (conj messages
-                            assistant-message
-                            {:role :tool
-                             :action/id action-id
-                             :content (pr-str result)}))
-               (assoc :replay-forms
-                      (conj replay-forms
-                            {:source (:repl/source request)
-                             :expected-status (:status result)}))))
+           ;; Computational history and conversational history are distinct.
+           ;; Every durable REPL evaluation replays, because every one of them
+           ;; mutated the session's single bounded Context.  Only agent-origin
+           ;; evaluations reconstruct conversation turns; an operator form was
+           ;; never something the model said, and synthesizing an assistant
+           ;; message for it would put words in the model's mouth.
+           (cond-> state
+             true (assoc :replay-forms
+                         (conj replay-forms
+                               {:source (:repl/source request)
+                                :expected-status (:status result)}))
+             (not operator?)
+             (assoc :messages
+                    (conj messages
+                          assistant-message
+                          {:role :tool
+                           :action/id action-id
+                           :content (pr-str result)}))))
 
          state))
      {:messages (vec (:session/messages checkpoint))
@@ -332,6 +347,41 @@
               :action/id action-id
               :content (pr-str result)})
       (checkpoint! session :repl-result)
+      result)))
+
+(defn operator-evaluate!
+  "Evaluates operator-authored source in the session's own bounded Context.
+
+  The operator REPL shares the model's Context, so its evaluations mutate the
+  same computational state the model's journaled forms depend on.  They must
+  therefore be durable, or a later agent form that reads an operator
+  definition would replay against a Context that never reconstructed it and
+  resume would fail its status-equivalence check.
+
+  The durable shape reuses :repl/request and :repl/result and marks provenance
+  with :repl/origin :operator.  Absent :repl/origin means :agent, so existing
+  journals keep their meaning.  The request is durable before evaluation, so an
+  interrupted operator evaluation is caught by the same unresolved-effect
+  recovery invariant as an interrupted agent evaluation.
+
+  This deliberately appends no conversation message: an operator form is
+  computational history, not something the model said."
+  [^AgentSession session source]
+  (let [request-id (str (UUID/randomUUID))]
+    (append-session-event! session
+                           {:event/type :repl/request
+                            :request/id request-id
+                            :repl/origin :operator
+                            :repl/source source})
+    (let [result (bb4t/evaluate (:bb4t session) source)]
+      (append-session-event! session
+                             {:event/type :repl/result
+                              :request/id request-id
+                              :repl/origin :operator
+                              :repl/result result})
+      (swap! (:replay-forms session) conj
+             {:source source :expected-status (:status result)})
+      (checkpoint! session :operator-repl-result)
       result)))
 
 (defn finish! [^AgentSession session message]

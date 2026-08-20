@@ -4,10 +4,12 @@
   The reducer, the projections, and the renderer are pure, so all of this
   runs without a terminal.  The agent integration drives the same worker the
   TUI uses, against a fake provider."
-  (:require [bbagent.bb4t :as bb4t]
+  (:require [bbagent.agent :as agent]
+            [bbagent.bb4t :as bb4t]
             [bbagent.errors :as errors]
             [bbagent.provider :as provider]
             [bbagent.session :as session]
+            [bbagent.store :as store]
             [bbagent.tui.command :as command]
             [bbagent.tui.render :as render]
             [bbagent.tui.state :as state]
@@ -20,6 +22,11 @@
 (def ^:private ansi-pattern (re-pattern (str (char 27) "\\[[0-9;]*m")))
 
 (defn- plain [line] (str/replace line ansi-pattern ""))
+
+(defn- error-category [thunk]
+  (try (thunk) nil
+       (catch clojure.lang.ExceptionInfo failure
+         (:bbagent/error (ex-data failure)))))
 
 (defn- temp-root [prefix]
   (str (Files/createTempDirectory
@@ -495,6 +502,147 @@
         (finally
           (command/shutdown! worker)
           (session/close! @session-atom :test-end))))))
+
+(deftest operator-state-survives-resume-test
+  (testing "an operator definition the model later uses must reconstruct"
+    (doseq [backend [:file :sqlite]]
+      (testing (str "backend " (name backend))
+        (let [state-root (temp-root (str "bbagent-operator-resume-" (name backend)))
+              project-root (project)
+              session-id (str "operator-resume-" (name backend))
+              first-session (session/start! {:state-root state-root
+                                             :project-root project-root
+                                             :model-provider (provider/fake [])
+                                             :system-prompt "test prompt"
+                                             :session-id session-id
+                                             :store-backend backend})]
+          (is (= :ok (:status (session/operator-evaluate!
+                               first-session "(def operator-value 41)"))))
+          (session/close! first-session :test-end)
+
+          ;; A later agent form reads the operator definition. Its :ok status
+          ;; becomes a durable replay expectation, so if the operator form did
+          ;; not reconstruct, the next resume would fail closed.
+          (let [second-session
+                (session/resume! {:state-root state-root
+                                  :session-id session-id
+                                  :model-provider
+                                  (provider/fake
+                                   [(provider/fake-response
+                                     {:action/type :repl/eval
+                                      :source "(+ operator-value 1)"})
+                                    (provider/fake-response
+                                     {:action/type :finish :message "42"})])
+                                  :system-prompt "test prompt"
+                                  :store-backend backend})]
+            (is (= "42" (agent/turn! second-session "add one")))
+            (session/close! second-session :test-end))
+
+          (let [third-session (session/resume! {:state-root state-root
+                                                :session-id session-id
+                                                :model-provider (provider/fake [])
+                                                :system-prompt "test prompt"
+                                                :store-backend backend})]
+            (testing "the operator value is reconstructed in the fresh context"
+              (is (= 41 (get-in (session/operator-evaluate!
+                                 third-session "operator-value")
+                                [:evaluation :value :value/data]))))
+            (session/close! third-session :test-end)))))))
+
+(deftest operator-evaluation-is-not-a-conversation-turn-test
+  (testing "operator forms are computational history, not model speech"
+    (let [state-root (temp-root "bbagent-operator-conversation")
+          session-id "operator-conversation"
+          opts {:state-root state-root
+                :project-root (project)
+                :model-provider (provider/fake [])
+                :system-prompt "test prompt"
+                :session-id session-id
+                :store-backend :sqlite}
+          s (session/start! opts)]
+      (session/operator-evaluate! s "(def only-operator 7)")
+      (is (empty? @(:messages s))
+          "an operator evaluation adds no message to the live session")
+      (session/close! s :test-end)
+      (let [resumed (session/resume! (-> opts
+                                         (dissoc :project-root :session-id)
+                                         (assoc :session-id session-id)))]
+        (is (empty? @(:messages resumed))
+            "resume must not synthesize an assistant or tool turn for it")
+        (is (= 1 (count @(:replay-forms resumed)))
+            "but it must appear in the computational replay program")
+        (session/close! resumed :test-end)))))
+
+(deftest operator-partial-mutation-replays-test
+  (testing "a form that mutates then throws still reconstructs its mutation"
+    (let [state-root (temp-root "bbagent-operator-partial")
+          session-id "operator-partial"
+          opts {:state-root state-root
+                :project-root (project)
+                :model-provider (provider/fake [])
+                :system-prompt "test prompt"
+                :session-id session-id
+                :store-backend :sqlite}
+          s (session/start! opts)
+          result (session/operator-evaluate!
+                  s "(do (def partial-value 5) (project/read \"missing.txt\"))")]
+      (is (= :error (:status result)) "the form failed after mutating")
+      (session/close! s :test-end)
+      (let [resumed (session/resume! (dissoc opts :project-root))]
+        (is (= 5 (get-in (session/operator-evaluate! resumed "partial-value")
+                         [:evaluation :value :value/data]))
+            "failed forms replay too, because SCI kept the mutation")
+        (session/close! resumed :test-end)))))
+
+(deftest interrupted-operator-evaluation-fails-recovery-test
+  (testing "a durable operator request with no result is an ambiguous effect"
+    (let [state-root (temp-root "bbagent-operator-interrupted")
+          session-id "operator-interrupted"
+          opts {:state-root state-root
+                :project-root (project)
+                :model-provider (provider/fake [])
+                :system-prompt "test prompt"
+                :session-id session-id
+                :store-backend :sqlite}
+          s (session/start! opts)]
+      ;; Simulate a crash between the durable request and its result by
+      ;; appending only the request, exactly as operator-evaluate! would.
+      (store/append-event! (:store s) session-id
+                           {:event/type :repl/request
+                            :request/id "orphan-operator-request"
+                            :repl/origin :operator
+                            :repl/source "(def never-finished 1)"})
+      (session/close! s :test-end)
+      (is (= :session-recovery-failure
+             (error-category #(session/resume! (dissoc opts :project-root))))
+          "resume must fail closed rather than silently drop the effect"))))
+
+(deftest tail-read-is-bounded-test
+  (testing "the first event read is bounded at the storage layer"
+    (doseq [backend [:file :sqlite]]
+      (testing (str "backend " (name backend))
+        (let [state-root (temp-root (str "bbagent-tail-" (name backend)))
+              session-id (str "tail-" (name backend))
+              s (session/start! {:state-root state-root
+                                 :project-root (project)
+                                 :model-provider (provider/fake [])
+                                 :system-prompt "test prompt"
+                                 :session-id session-id
+                                 :store-backend backend})]
+          (dotimes [n 40]
+            (session/add-user-message! s (str "message " n)))
+          (let [store (:store s)
+                all (store/events store session-id)
+                tail (store/recent-events store session-id 10)]
+            (is (> (count all) 10))
+            (is (= 10 (count tail)))
+            (is (= (vec (take-last 10 all)) tail)
+                "the bounded tail equals the tail of the complete history")
+            (is (apply < (map :event/seq tail))
+                "rows are returned in ascending display order")
+            (is (= :journal-storage-failure
+                   (error-category #(store/recent-events store session-id 0)))))
+          (session/close! s :test-end))))))
 
 (deftest operator-repl-uses-the-bounded-context-test
   (testing "the operator REPL has exactly the model's authority"

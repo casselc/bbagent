@@ -316,6 +316,32 @@
         (catch Throwable failure
           (throw (recovery-failure failure)))))))
 
+(defn recent-events
+  "Bounded tail read.  SQLite selects the last `limit` rows by seq using the
+   primary key, then restores ascending order for display, so the complete
+   history is never decoded to show the newest events."
+  [store session-id limit]
+  (locking (:lock store)
+    (ensure-open! store)
+    (store/validate-session-id! session-id)
+    (when-not (and (integer? limit) (pos? limit))
+      (throw (errors/error :journal-storage-failure
+                           "recent-events requires a positive limit"
+                           {:limit limit})))
+    (let [^Connection connection (:connection store)]
+      (try
+        (->> (jdbc/execute!
+              connection
+              [(str "SELECT " event-columns
+                    " FROM event WHERE session_id = ? ORDER BY seq DESC LIMIT ?")
+               session-id limit]
+              result-options)
+             (mapv #(row->event connection session-id %))
+             reverse
+             vec)
+        (catch Throwable failure
+          (throw (recovery-failure failure)))))))
+
 (defn validate-session! [store session-id]
   (locking (:lock store)
     (ensure-open! store)
@@ -545,6 +571,8 @@
     (append-event! store session-id event))
   (events [store session-id]
     (events store session-id))
+  (recent-events [store session-id limit]
+    (recent-events store session-id limit))
   (validate-session! [store session-id]
     (validate-session! store session-id))
   (unresolved-effects [store session-id]

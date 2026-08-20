@@ -160,7 +160,7 @@
     [(segments->line [[st prompt] [nil (str (:buffer input))]] width)
      (segments->line
       [[label (if (= :repl mode)
-                "operator REPL: session's bounded context; not journaled, not replayed on resume"
+                "operator REPL: the session's bounded context; journaled and replayed on resume"
                 "message goes to the agent; Ctrl-T switches to the operator REPL")]]
       width)]))
 
@@ -194,8 +194,9 @@
    "interrupt a running evaluation; bbagent has no worker termination yet."
    ""
    "The operator REPL uses the session's bounded bb4t context, so it has"
-   "exactly the model's authority. Its evaluations are not journaled and"
-   "are not replayed on resume."
+   "exactly the model's authority. Operator and model share one context, so"
+   "operator evaluations are journaled and replayed on resume too. They do"
+   "not become conversation turns; the model is never told it said them."
    "" "  Enter or Esc to close"])
 
 (defn- modal-lines [state width height]

@@ -243,6 +243,6 @@
       "s0a-sqlite-smoke" (sqlite-smoke-command options)
       "s0b-native-smoke" (s0b-smoke-command options)
       "describe" (prn {:application :bbagent
-                         :scope :s0b
+                         :scope :a1
                          :surface :persistent-sci})
       (print (usage)))))

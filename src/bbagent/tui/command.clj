@@ -11,13 +11,14 @@
   functions the CLI calls, in the same order.  Only the reporting is
   asynchronous.
 
-  Two disciplines are borrowed from the sibling charm application bbf1:
-  every command catches its own failures and converts them to a domain
-  message, because charm's loop rethrows and terminates on a :error
-  message; and every result carries the generation it was issued under so
-  a stale reply cannot land on a newer session."
+  One discipline is borrowed from the sibling charm application bbf1: every
+  command catches its own failures and converts them to a domain message,
+  because charm's loop rethrows and terminates on a :error message.
+
+  Commands execute one at a time in submission order.  That serialization,
+  not a generation tag, is what prevents a stale reply from landing on a
+  newer session: a session switch cannot overlap the work it replaces."
   (:require [bbagent.agent :as agent]
-            [bbagent.bb4t :as bb4t]
             [bbagent.errors :as errors]
             [bbagent.provider :as provider]
             [bbagent.session :as session]
@@ -78,8 +79,7 @@
         session-id (:session-id agent-session)]
     (if cursor
       (store/events-after store session-id cursor)
-      (let [all (store/events store session-id)]
-        (vec (take-last initial-event-read all))))))
+      (store/recent-events store session-id initial-event-read))))
 
 (defn events-message [agent-session cursor]
   {:type :bbagent/events :events (tail-events agent-session cursor)})
@@ -118,12 +118,14 @@
       :operator/repl-eval
       ;; Evaluated in the session's own bounded bb4t Context: the operator
       ;; gets exactly the authority the model has, never more, and never a
-      ;; trusted host REPL.  This evaluation is deliberately NOT journaled,
-      ;; so it is not replayed on resume; the UI labels it as such.
+      ;; trusted host REPL.  It goes through session/operator-evaluate! so
+      ;; the evaluation is durable and replayed on resume; the operator and
+      ;; the model mutate one Context, so operator state must reconstruct
+      ;; too or a later agent form could fail to replay.
       (do
         (publish! out {:type :bbagent/activity :activity :evaluating
                        :status "evaluating in bounded context"})
-        (let [result (bb4t/evaluate (:bb4t agent-session) (:source command))]
+        (let [result (session/operator-evaluate! agent-session (:source command))]
           (publish! out {:type :bbagent/repl-result
                          :source (:source command)
                          :result result})

@@ -340,9 +340,9 @@
            :status (str "error: " (:error/label (:error msg))))
 
     :bbagent/repl-result
-    ;; Operator REPL output is transient view state.  It is deliberately not
-    ;; durable: the evaluation ran in the session's bounded Context but was
-    ;; not journaled, so it is not replayed on resume.
+    ;; The rendered log is transient view state.  The evaluation itself is
+    ;; durable: session/operator-evaluate! journals it and it replays on
+    ;; resume, because it mutated the same Context the model uses.
     (-> state
         (update :repl/log (fn [log]
                             (vec (take-last 100

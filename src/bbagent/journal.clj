@@ -406,6 +406,19 @@
     (locking op-lock
       (ensure-open! this)
       (count (cached-events this session-id))))
+  (recent-events [this session-id limit]
+    ;; The file backend is a single-owner reference store that recovers a
+    ;; session once and serves later queries from that cache, so the bounded
+    ;; tail is a trim of the already-recovered vector.  The cost this avoids
+    ;; is repeated whole-history decoding, which is the SQLite concern.
+    (locking op-lock
+      (ensure-open! this)
+      (when-not (and (integer? limit) (pos? limit))
+        (throw (errors/error :journal-storage-failure
+                             "recent-events requires a positive limit"
+                             {:limit limit})))
+      (let [scanned (cached-events this session-id)]
+        (vec (take-last limit scanned)))))
   (unresolved-effects [this session-id]
     (locking op-lock
       (ensure-open! this)
