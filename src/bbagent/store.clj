@@ -37,11 +37,16 @@
   (request-event [store session-id request-id]
     "Returns the earliest :repl/request carrying the request ID, or nil.")
   (recent-events [store session-id limit]
-    "Returns at most limit most-recent events, in ascending :event/seq
-     order.  This is a bounded query, not a whole-history read followed by a
-     trim: a backend must not decode or hydrate the complete session merely
-     to answer it.  Used for a view's first read, after which events-after
-     is strictly incremental.")
+    "Returns at most limit most-recent events, in ascending :event/seq order.
+
+     The contract is to avoid a *repeated* whole-history read where the
+     backend supports bounded physical selection.  SQLite performs a bounded
+     query.  The file reference backend is a single-owner store with lazy
+     whole-session recovery, so it may pay its normal one-time recovery cost
+     on first access and serves the tail from its cache thereafter.
+
+     Used for a view's first read, after which events-after is strictly
+     incremental.")
   (list-sessions [store]
     "Returns the sorted session IDs present in the store."))
 

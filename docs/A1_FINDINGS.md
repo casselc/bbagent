@@ -8,8 +8,10 @@ bbagent, and it is only a projection and controller over the existing
 model and no second authority path.
 
 The full build wrapper passes end to end against the TUI image, seventeen
-PTY-driven native gates pass, the deterministic suite is clean, and the model
-Context is byte-for-byte the A0 Context it was before the TUI existed.
+PTY-driven native gates pass, the deterministic suite is clean, and the
+model-facing ContextSpec, effective grants, limits, and projected authority
+surface are unchanged from A0. See section 10 for what deliberately does differ:
+the runtime coordinate, and therefore the coordinates derived from it.
 
 Two defects were found by the native gate rather than by unit tests, and one
 recovery hole introduced by the first implementation was found in review and
@@ -294,9 +296,27 @@ public remotes.
 
 ## 10. Authority Regression
 
-**Unchanged.** Same `:agent/project-read` ContextSpec, same three grants
-(`#{:project/read :data/json-write :data/json-read}`), zero projected classes,
-zero supplied imports.
+**The authority surface is unchanged.** Same `:agent/project-read` ContextSpec,
+same three grants (`#{:project/read :data/json-write :data/json-read}`), same
+limits, same three projected Vars, zero projected classes, zero supplied
+imports.
+
+**What deliberately differs, and why that is correct.** The context coordinate
+is a hash over the effective context, which includes the runtime coordinate, so
+a different bb4t application build legitimately produces a different context
+coordinate even when authority is identical. That is the point of these
+coordinates: they distinguish runtime changes in later experiments.
+
+| Coordinate | A0 native | A1 native | Same? |
+|---|---|---|---|
+| catalog | `sha256:f132b513c449…` | `sha256:f132b513c449…` | yes |
+| runtime | `sha256:cad47c1f697f…` | `sha256:345b1b0342ef…` | no, by design |
+| profile | `:agent/project-read` | `:agent/project-read` | yes |
+| grants | three | the same three | yes |
+
+The coordinates derived from the runtime coordinate — effective and context —
+therefore differ too. Nothing about the model's authority does. This finding
+claims unchanged authority, not an identical context hash.
 
 Negative probes grew from 22 to **35**, all returning `:error` with category
 `:bb4t-evaluation-failure`, and no forbidden database was created. The thirteen

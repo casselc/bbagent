@@ -407,10 +407,12 @@
       (ensure-open! this)
       (count (cached-events this session-id))))
   (recent-events [this session-id limit]
-    ;; The file backend is a single-owner reference store that recovers a
-    ;; session once and serves later queries from that cache, so the bounded
-    ;; tail is a trim of the already-recovered vector.  The cost this avoids
-    ;; is repeated whole-history decoding, which is the SQLite concern.
+    ;; The file backend is a single-owner reference store with lazy
+    ;; whole-session recovery, so the first access to an unrecovered session
+    ;; still pays its normal recovery cost; the bounded tail is a trim of the
+    ;; recovered vector and every later call is served from cache.  What the
+    ;; contract rules out is a *repeated* whole-history read, which is where
+    ;; SQLite's bounded query matters.
     (locking op-lock
       (ensure-open! this)
       (when-not (and (integer? limit) (pos? limit))
