@@ -1,0 +1,123 @@
+{:milestone :a1
+ :evidence/scope "native TUI over the S0b application image"
+ :evidence/platform "Linux x86_64 glibc"
+ :evidence/result :pass
+
+ :coordinates
+ {:bb4t "0ca6addef70278189aefa73df940dee0e9e607b4"
+  :bbagent "7ba6add7ea41cee505b4f6f830868872b8358b2e"
+  :bb4t/base-tag "bb4t-s0a"
+  :bbagent/base-tag "bbagent-s0b"
+  :application/profile :app/bbagent}
+
+ :toolchain
+ {:graalvm/distribution "Oracle GraalVM 25.2.4+7.1"
+  :native-image/version "25.0.4"
+  :java/version "25.0.4+7-LTS"
+  :leiningen "2.11.2"}
+
+ :tui-dependencies
+ {:charm {:maven "de.timokramer/charm.clj" :version "0.2.74"
+          :git/tag "v0.2.74"
+          :git/sha "718daf3291b767f90cfe9ca9389f147bb83d58cd"
+          :jar/sha256
+          "a142eec611db7493949dc29847329f6be2bde2fb7aa500a8b421cda00211c27e"}
+  :jline {:version "4.3.1" :already-in-bb4t? true}
+  :core.async {:version "1.8.741" :already-in-bb4t? true}
+  :added-build-config
+  {:initialize-at-build-time ["org.jline.utils.InfoCmp$Capability"]
+   :reflection ["org.jline.keymap.KeyMap" "java.util.ArrayList"]}}
+
+ :artifacts
+ {"dist/bbagent"
+  {:bytes 74844416
+   :sha256 "ad20e3fb49b9f2bae741629452d64f5ddd92c215a510c45d938fbb260baf4ae0"}
+  "dist/libsqlitejdbc.so"
+  {:bytes 1093888
+   :sha256 "f374da845a36d0a663521457f8e454413325e3b8247a15c2677426f4b15cf6ac"}}
+
+ :build {:native-image/seconds 43.8
+         :native-image/warnings 22
+         :image/grew-bytes 9240576
+         :image/grew-from "S0b dist/bbagent 65,603,840 bytes"}
+
+ :wrapper-gates
+ {:description "script/build-native ran every S0b gate against the TUI image"
+  :s0b/create :pass
+  :s0b/resume :pass
+  :s0b/cas-non-vacuous :pass
+  :s0b/ambiguous-exit :pass
+  :s0b/transaction-crash :pass
+  :sidecar/relocated :pass
+  :sidecar/absent-fails-closed :pass
+  :sidecar/digest-mismatch-fails-closed :pass
+  :runtime-tmp/empty :pass
+  :authority :pass}
+
+ :authority
+ {:negative-probe/count 35
+  :negative-probe/count-before-a1 22
+  :projected-class-count 0
+  :supplied-import-count 0
+  :context/profile :agent/project-read
+  :context/grants #{:project/read :data/json-write :data/json-read}
+  :grants/changed? false
+  :negative-statuses #{:error}
+  :negative-categories #{:bb4t-evaluation-failure}
+  :tui-negatives
+  ["org.jline.terminal.Terminal"
+   "org.jline.terminal.TerminalBuilder"
+   "org.jline.terminal.TerminalBuilder/terminal"
+   "org.jline.utils.InfoCmp$Capability"
+   "org.jline.keymap.KeyMap"
+   "org.jline.reader.LineReader"
+   "charm.program/require"
+   "charm.terminal/require"
+   "charm.terminal/create-terminal"
+   "bbagent.tui.app/require"
+   "bbagent.tui.command/require"
+   "bbagent.tui.command/start-worker!"
+   "bbagent.tui.state/require"]
+  :forbidden-database/created? false}
+
+ :tui-native-proof
+ {:harness "script/tui-native-proof.py, real PTY, 120x40"
+  :provider "unroutable endpoint; no model request is issued in this proof"
+  :gates {:tui-starts :pass
+          :header-shows-sqlite :pass
+          :header-has-session :pass
+          :capability-pane-from-bb4t :pass
+          :profile-from-bb4t :pass
+          :events-pane :pass
+          :session-browser :pass
+          :operator-repl-mode :pass
+          :bounded-evaluation :pass
+          :clean-exit-with-checkpoint :pass
+          :sessions-listed :pass
+          :resume-starts :pass
+          :resume-same-session :pass
+          :resume-capabilities :pass
+          :resume-clean-exit :pass}
+  :result :pass}
+
+ :defects-found-and-fixed
+ [{:defect "typed spaces were silently swallowed"
+   :cause "the printable-rune guard rejected blank strings; charm delivers a space as an ordinary rune"
+   :impact "multi-token REPL forms were corrupted before evaluation"
+   :found-by :native-tui-proof
+   :fixed-in "7ba6add7ea41cee505b4f6f830868872b8358b2e"}
+  {:defect "quitting lingered about 48 seconds after a correct checkpoint"
+   :cause "core.async pooled threads keep the native runtime alive"
+   :impact "operator-visible hang after exit; durability was never at risk"
+   :found-by :native-tui-proof
+   :fixed-in "7ba6add7ea41cee505b4f6f830868872b8358b2e"}]
+
+ :jvm-tests {:tests 94 :assertions 737 :failures 0 :errors 0}
+
+ :nonclaims
+ ["no live-provider TUI session was run in this evidence"
+  "no dogfood session yet"
+  "Linux x86_64 glibc only; no cross-platform or static-linking claim"
+  "the operator REPL is not journaled and is not replayed on resume"
+  "durable checkpoint semantics are unchanged; long-session debt is untouched"
+  "build used local repository clones at the recorded SHAs rather than the public remotes"]}

@@ -107,12 +107,6 @@ def run(dist, state_root, project_root):
     browser = plain(bytes(s.out[mark:]))
     gates["session_browser"] = "sessions" in browser
 
-    session_id = None
-    m = re.search(r"session\s+([0-9a-f]{8})", first)
-    if m:
-        session_id = m.group(1)
-    gates["header_has_session"] = session_id is not None
-
     s.send(b"\x1b", settle=1.0)  # Esc: close browser
     mark = len(s.out)
     s.send(b"\x14", settle=1.0)  # Ctrl-T: operator repl mode
@@ -136,6 +130,11 @@ def run(dist, state_root, project_root):
     ids = [line.strip() for line in listing.stdout.splitlines() if line.strip()]
     gates["sessions_listed"] = len(ids) >= 1
     target = ids[0] if ids else None
+
+    # charm redraws incrementally, so the header's label and value are not
+    # guaranteed to be contiguous in the byte stream.  Assert on the id the
+    # store actually recorded instead of on adjacency in the rendering.
+    gates["header_has_session"] = bool(target) and target[:8] in first
 
     if target:
         s2 = Session([exe, "tui", target, "--store", "sqlite"], dist, env)
