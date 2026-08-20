@@ -186,6 +186,17 @@
       (testing "shift-tab cycles backward when the terminal reports it"
         (is (= :input (:focus (first (press s1 :tab {:shift true})))))))))
 
+(deftest space-is-typed-not-swallowed-test
+  (testing "a space arrives as a rune and must reach the buffer"
+    (let [typed (reduce (fn [st c] (first (press st c))) (state/initial {})
+                        ["(" "+" " " "1" " " "2" ")"])]
+      (is (= "(+ 1 2)" (get-in typed [:input :buffer]))
+          "dropping spaces silently corrupts every multi-token REPL form")))
+  (testing "charm's :space key form also inserts a space"
+    (let [typed (-> (state/initial {}) (press "a") first
+                    (press :space) first (press "b") first)]
+      (is (= "a b" (get-in typed [:input :buffer]))))))
+
 (deftest input-editing-test
   (let [typed (reduce (fn [s c] (first (press s c))) (state/initial {})
                       ["h" "i"])]

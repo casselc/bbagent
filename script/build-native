@@ -208,13 +208,38 @@ fi
 TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" s0a-sqlite-smoke \
   --database "$BUILD_ROOT/s0b-authority.db" --project "$S0B_PROJECT" \
   > "$BUILD_ROOT/s0b-authority.edn"
-if ! grep -Fq ':negative-probe/count 22' "$BUILD_ROOT/s0b-authority.edn" || \
+if ! grep -Fq ':negative-probe/count 35' "$BUILD_ROOT/s0b-authority.edn" || \
    ! grep -Fq 'java.sql.Date' "$BUILD_ROOT/s0b-authority.edn" || \
    ! grep -Fq 'java.sql.Timestamp' "$BUILD_ROOT/s0b-authority.edn" || \
    ! grep -Fq 'bbagent.journal/file-store' "$BUILD_ROOT/s0b-authority.edn" || \
    ! grep -Fq ':forbidden-database/created? false' "$BUILD_ROOT/s0b-authority.edn"
 then
   echo "S0b native authority evidence is incomplete" >&2
+  exit 1
+fi
+
+# A1: the image now compiles a TUI.  Prove the model Context did not inherit
+# terminal, JLine, charm, or TUI-adapter authority from that reachability.
+for probe in 'org.jline.terminal.Terminal' \
+             'org.jline.terminal.TerminalBuilder/terminal' \
+             'org.jline.keymap.KeyMap' \
+             'org.jline.reader.LineReader' \
+             'charm.program/require' \
+             'charm.terminal/create-terminal' \
+             'bbagent.tui.app/require' \
+             'bbagent.tui.command/start-worker!' \
+             'bbagent.tui.state/require'
+do
+  if ! grep -Fq "$probe" "$BUILD_ROOT/s0b-authority.edn"
+  then
+    echo "A1 TUI authority negative missing: $probe" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq ':projected-class-count 0' "$BUILD_ROOT/s0b-authority.edn" || \
+   ! grep -Fq ':supplied-import-count 0' "$BUILD_ROOT/s0b-authority.edn"
+then
+  echo "A1 TUI reachability widened the model surface" >&2
   exit 1
 fi
 

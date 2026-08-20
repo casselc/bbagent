@@ -164,11 +164,13 @@
 (defn- key-of [msg] (:key msg))
 
 (defn- printable-runes
-  "charm reports typed characters as :runes with a string key."
+  "charm reports typed characters as :runes with a string key.  A space
+   arrives that way too, so this must not treat blank strings as absent;
+   rejecting them silently swallowed every space in the input line."
   [msg]
   (let [k (key-of msg)]
-    (when (and (string? k) (not (:ctrl msg)) (not (:alt msg))
-               (not (str/blank? k)))
+    (when (and (string? k) (pos? (count k))
+               (not (:ctrl msg)) (not (:alt msg)))
       k)))
 
 (defn- global-key [state msg]

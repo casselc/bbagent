@@ -110,7 +110,15 @@
        {:agent-session agent-session
         :store-backend (storage/backend backend)
         :state-root (state-root options)})
-      (finally (session/close! agent-session :operator-exit)))))
+      (finally (session/close! agent-session :operator-exit)))
+    ;; The session is durably checkpointed and its store is closed by the
+    ;; time this runs.  core.async, which charm uses for its command loop,
+    ;; leaves pooled threads alive with a long keep-alive, so returning
+    ;; normally makes the process linger for the better part of a minute
+    ;; after the operator has already quit.  Exit deterministically instead;
+    ;; nothing durable is outstanding at this point.
+    (flush)
+    (System/exit 0)))
 
 (defn- run-command [options]
   (let [agent-session
