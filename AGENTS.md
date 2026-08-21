@@ -10,7 +10,17 @@ Standing rules:
 - record explicit coordinates and honest unknown/development values;
 - prefer the smallest implementation that answers the active milestone question.
 
-For A1 (see `docs/CURRENT_SCOPE.md`):
+For A2 (see `docs/CURRENT_SCOPE.md`):
+
+- recovery reconstructs a session's computational state and never re-observes or
+  re-actuates the project; a semantic operation invoked during replay returns its
+  recorded receipt or recovery fails closed;
+- an operation that touches the world declares an effect, and every effect is
+  classified in `bb4t.catalog/effects` as an observation or an actuation;
+- keep model-facing prose capability-independent: state closure, not absence, and
+  let the derived orientation generate what the surface actually projects.
+
+From A1, still standing:
 
 - the TUI is a projection and controller, never a second state model or authority
   path; domain truth stays in `AgentSession`, the store, and the bb4t Context;

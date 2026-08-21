@@ -1,0 +1,125 @@
+{:milestone :a2
+ :evidence :durable-replay-semantics
+ :result :pass
+ :question "Can a session that observed or changed a project be resumed without re-observing or re-actuating that project?"
+
+ :coordinate
+ {:bb4t/commit "cc18ca7b4d6bcb9ff4d4303417d6d94a6616875a"
+  :bbagent/commit "c23b31634785d44816e8a0163291553aeba8b807"
+  :builder "script/build-native"
+  :note "built at c23b3163; commits after it change only docs/, artifacts/ and script/a2-live-replay.clj, so the image matches the runtime source a reviewer reads"}
+
+ :invariant
+ "Recovery reconstructs historical computational state without re-observing or re-actuating the external world."
+
+ :implementation
+ {:boundary "bb4t.kernel/invoke-authorized"
+  :facade "bb4t.transcript, bb4t.context/evaluate arity 3"
+  :classification "bb4t.catalog/effects, validated by bb4t.kernel/validate-catalog"
+  :recording "bbagent.session/evaluate! and operator-evaluate!, journalled as :repl/operations on :repl/result"
+  :recovery "bbagent.session/replay-context! over the plan bbagent.session/recovery-state builds"
+  :lookup "bbagent.store/result-event, implemented by both backends"
+  :storage "the journal's existing content-addressed externalization; no second persistence mechanism"}
+
+ :receipt
+ {:keys [:operation/id :capability/id :effects :args/digest :status :result
+         :result/digest]
+  :args/digest "bb4t.canonical/lenient-coordinate, total over any argument"
+  :result/digest "bb4t.canonical/coordinate, taken before the journal stores the value, so a result the journal could not keep intact fails closed rather than reconstructing wrong"}
+
+ :fail-closed
+ {:operation-mismatch "replay called a different operation"
+  :args-mismatch "replay called the same operation with different arguments"
+  :exhausted "replay called more operations than were recorded"
+  :unconsumed "replay called fewer operations than were recorded"
+  :result-integrity "a recorded result did not survive storage intact"
+  :opaque-result "a recorded result was not inert enough to reconstruct"
+  :actuation-without-transcript "a form recorded before receipts existed would change the project again"
+  :ordering "the transcript is checked before the status, because a divergence can reach the recorded status by a different route"}
+
+ :compatibility
+ {:sessions-with-receipts "reconstructed exactly; :session/replay :exact? true"
+  :sessions-without-receipts "observations re-execute against the live world and are counted; actuations fail closed"
+  :claim "the resume event records :exact?, :forms, :reconstructed, :legacy and :reobserved, so a session never implies it reproduced history when it re-observed the project"}
+
+ :image
+ {:path "dist/bbagent"
+  :bytes 75565312
+  :sha256 "0f3adc37176d2e249b135157802eca6d258b6bbab72d029ec4a7f5d1d50cbc8d"
+  :platform {:os "Ubuntu" :arch "x86_64" :libc "glibc"}
+  :toolchain {:graalvm "Oracle GraalVM 25.0.4+7.1" :java "25.0.4"}
+  :native-image-additions :none
+  :note "the repair added no reachability metadata, no build flag, and no dependency"}
+
+ :authority
+ {:context/grants #{:project/read :project/list :project/search :project/stat
+                    :project/edit :data/json-write :data/json-read}
+  :projected-class-count 0
+  :supplied-import-count 0
+  :negative-probe/count 35
+  :claim "recovery semantics changed; the model's surface did not"}
+
+ :native-replay
+ {:harness "bbagent s0b-native-smoke --phase replay-create | replay-resume"
+  :gated-by "script/build-native"
+  :scenario "a session reads README.md and applies an anchored appending edit; the README is rewritten and the process is restarted"
+  :observed {:file-after-create "seed!"
+             :file-after-resume "seed!"
+             :reconstructed-observation "A2 replay fixture, as the session observed it.\n"
+             :current-world-absent-from-resume? true
+             :session/replay {:exact? true :forms 3 :legacy 0 :reconstructed 3
+                              :reobserved []}}}
+
+ :pty
+ {:harness "script/tui-native-proof.py"
+  :gates 37
+  :passed 37
+  :new-for-this-repair
+  ["write_session_listed"
+   "resume_after_edit_starts"
+   "resume_after_edit_clean_exit"
+   "resume_after_edit_wrote_nothing"
+   "journal_edit_result_survives_resume"
+   "journal_edit_not_reapplied"
+   "journal_replay_exact"]
+  :note "the write session is now resumed at a terminal, which the previous proof deliberately avoided because it was impossible"}
+
+ :live-model
+ {:harness "script/a2-live-replay.clj"
+  :model "Qwen3.6-27B-MTP-GGUF"
+  :endpoint "Lemonade loopback"
+  :repetitions 1
+  :edit-phase
+  {:turn :finished
+   :actions 6
+   :repl {:ok 5 :error 1}
+   :operations [[[:project/read :ok]]
+                [[:project/edit :error]]
+                [[:project/stat :ok]]
+                [[:project/edit :ok]]
+                []
+                [[:project/read :ok]]]
+   :note "the one error is the model guessing :base as the file's content, which it recovered from with project/stat"}
+  :resume-phase
+  {:process :separate
+   :turn :finished
+   :answer "The value of `(:bytes applied)` is 137."
+   :session/replay {:exact? true :forms 6 :legacy 0 :reconstructed 6
+                    :reobserved []}
+   :file/unchanged? true
+   :note "six forms reconstructed, including both the failed edit and the successful one; the edited file is byte-identical across the restart"}}
+
+ :suites
+ {:bbagent {:tests 149 :assertions 1170 :failures 0 :errors 0}
+  :bb4t {:tests 25 :assertions 198 :failures 0 :errors 0
+         :includes "96-case authority corpus"}}
+
+ :nonclaims
+ ["a capability with no declared effects is assumed to be a pure function of its arguments; that is a contract the catalog states and validates classification against, not something the kernel proves"
+  "an operation result the journal's secret-stripping alters cannot be reconstructed, so such a session fails closed on resume rather than resuming with a different value; only data.json/read can produce such a result today"
+  "a checkpoint still rewrites every form's source, so a very long session's journal remains quadratic in source bytes; receipts were kept out of the checkpoint for exactly this reason, but the existing growth was not addressed"
+  "arguments outside the inert data domain are identified by type alone in the argument digest; such a call fails its operation's own validation and records the same failure either way"
+  "one model, one endpoint, one live repetition; the live scenario is a demonstration that the path works end to end, not a measurement"
+  "Linux x86_64 glibc only; no cross-platform or static-linking claim"
+  "the image digest is an artifact identifier, not a reproducibility claim"
+  "no JVM/native suite parity; the native evidence is the smoke, the authority corpus and the PTY gates"]}

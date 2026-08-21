@@ -1,51 +1,74 @@
-# A2 Findings (in progress): Useful Semantic Project World
+# A2 Findings: Useful Semantic Project World
 
-**Status: A2 active, blocked on one defect. Not ready to accept.**
+**Status: A2 complete. Recommended verdict PASS.**
 
 ## 0. For review
 
 Four capabilities are delivered, dogfooded against a live model, and proved in a
 native image: `project/list`, `project/search`, `project/stat`, `project/edit`.
-The milestone question is answered in the affirmative for observation and for a
-single anchored change. It is **not** answered for durable work, because of one
-defect.
+The blocking defect that held the milestone open — a session that changed the
+project could not be resumed — is closed, and the fix is a change to what
+recovery *is* rather than a special case for the operation that exposed it.
 
-### The blocking defect
+### The blocking defect, and what closed it
 
-**A session that edits a file cannot be resumed.** Replay rebuilds SCI state by
-re-running the session's forms; `project/edit` cannot be re-run, because version
-anchoring makes re-application a conflict by design. A form recorded `:ok`
-replays `:error` and recovery refuses the session. Both halves are correct and
-the combination is unusable. Detail and options in section 10.
+Recovery rebuilt a session's SCI state by re-running its forms. That is exact
+for computation and wrong for anything that touched a project. `project/edit`
+made it visible — version anchoring makes re-application a conflict by design,
+so a form recorded `:ok` replayed `:error` — but it was never only about edits:
+
+```clojure
+(def x (project/read "foo"))
+```
+
+was also wrong to replay, because if `foo` changed while bbagent was stopped,
+`x` would silently resume holding today's contents rather than what the session
+computed.
+
+Each evaluation now records the semantic operations it invoked, and recovery
+re-executes the Clojure while substituting those recordings at the operation
+boundary. Section 10 states the design; section 13 states the evidence.
 
 ### What the evidence covers
 
 | Evidence | Result |
 |---|---|
-| bbagent deterministic suite | 141 tests, 1013 assertions, 0 failures |
-| bb4t deterministic suite | 18 tests, 167 assertions, 0 failures, incl. 96-case authority corpus |
-| Native image | built; A2 grants present, 35 authority negatives denied, `:projected-class-count 0` |
-| PTY proof | 30 gates pass, at the commit under review |
+| bbagent deterministic suite | 149 tests, 1170 assertions, 0 failures |
+| bb4t deterministic suite | 25 tests, 198 assertions, 0 failures, incl. 96-case authority corpus |
+| Native image | built at bb4t `cc18ca7b` / bbagent `c23b3163`; A2 grants present, 35 authority negatives denied, `:projected-class-count 0` |
+| Native replay gate | a session that observed and changed a project resumes with neither repeated, gated by `script/build-native` |
+| PTY proof | 37 gates pass, 7 of them new, including resuming a session that edited |
 | Live model, fixture comparison | complete answers 0/3 before `project/list`, 3/3 after |
 | Live model, this repository | orientation question 13→6 actions; budget question 4 actions; edit task 8→5 actions |
+| Live model, edit → exit → resume → continue | 6 forms reconstructed exactly across a process boundary; edited file byte-identical |
 
 ### Decisions this needs
 
-1. **Fix effectful replay before anything else?** Recommended. Section 10 states
-   the shape of the fix; it is a recovery-semantics change, not a capability
-   change.
-2. **Is `:agent/project-develop` the right default?** Sessions now default to a
+1. **Is the operation-boundary model the right recovery semantics?** It is now
+   what the product does, and section 10 argues why the alternatives are worse.
+   The nonclaim to weigh is that a capability declaring no effects is *assumed*
+   pure, which the catalog states and validates classification against but does
+   not prove.
+2. **Is `:agent/project-develop` the right default?** Sessions default to a
    profile that can write. `:agent/project-survey` remains read-only and
-   `:agent/project-read` remains the frozen A0 surface.
-3. **Should `project/test` follow, or should A2 close after the fix?** The
-   milestone question is arguably already answered for the read surface.
+   `:agent/project-read` remains the frozen A0 surface. No implementation
+   evidence emerged against the default.
+3. **Should `project/test` follow, or should A2 close here?** The milestone
+   question is answered for observation, for change, and now for durability.
 4. **Is compare-and-swap by observation good enough?** `project/edit` reads,
-   compares, then renames; a writer inside that window is not detected.
+   compares, then renames; a writer inside that window is not detected. Kept
+   deliberately for this single-player milestone.
 
 ### What changed that a reviewer should not have to discover
 
-- the default orientation is now `:derived`, not the `:grounded` that A1.1
-  measured, because granting `project/list` made `:grounded`'s prose false;
+- recovery no longer re-executes semantic operations, and the durable journal
+  carries an operation transcript per evaluation (section 10);
+- `bb4t.catalog` now classifies every effect as an observation or an actuation,
+  and an unclassified effect fails catalog validation;
+- `bbagent.store` gained `result-event`, mirroring `request-event`;
+- the base system prompt no longer enumerates absent authority, which the A1.1
+  review recorded as an A2 entry condition (section 12);
+- the default orientation is `:derived`, not the `:grounded` that A1.1 measured;
 - the per-turn action budget moved from 12 to 40;
 - `base-allow` grew from 26 symbols to a reviewed pure set including `fn` and
   `defn`, argued pure and corpus-checked rather than proved (section 6);
@@ -195,7 +218,8 @@ the argument for treating a stale-prone constant as a defect rather than a note.
 
 ## 6. Nonclaims
 
-Current as of `project/edit`; supersedes anything narrower said earlier.
+Current as of the recovery repair; supersedes anything narrower said earlier.
+Section 13 adds the nonclaims specific to that repair.
 
 - **one model, one endpoint, few repetitions.** Every live number here is
   directional. The fixture comparison is three repetitions per arm; the
@@ -220,6 +244,16 @@ Current as of `project/edit`; supersedes anything narrower said earlier.
 - **the PTY gates prove an operator can drive the interface,** not that the
   rendering is correct in every terminal. Semantic claims are asserted against
   the durable journal instead, for the reason in section 11;
+- **a capability declaring no effects is assumed to be a pure function of its
+  arguments.** The catalog states that contract and validates that every
+  declared effect is classified as an observation or an actuation; it does not
+  prove that an unannotated operation reaches nothing;
+- **an operation result the journal's secret-stripping alters cannot be
+  reconstructed,** so such a session fails closed on resume rather than
+  resuming with a different value. Only `data.json/read` can produce one today;
+- **a checkpoint still rewrites every form's source,** so a long session's
+  journal remains quadratic in source bytes. Receipts were kept out of the
+  checkpoint to avoid making that worse, not to fix it;
 - **`concludes-limitation?` in the A1.1 harness now measures the wrong thing.**
   It scored the right answer while enumeration was missing.
 
@@ -321,7 +355,8 @@ unflattering rather than despite it.
 
 Previously the standing gap: every A2 claim was a JVM claim. It is now closed
 for the capabilities delivered so far. `artifacts/a2-native-evidence.edn` holds
-the coordinates.
+the coordinates. The gate and image numbers here are those of the survey
+surface as it stood; sections 11 and 13 record the images that followed.
 
 Built by `script/build-native` from the local working repositories at bb4t
 `05fd11a9` and bbagent `982bafc7`, producing a 74,909,952-byte image.
@@ -363,6 +398,7 @@ pane and the **agent-authored helper** come back — a helper is computational
 state, and replay has to reconstruct it exactly as it does a `def`.
 
 ### The gate found a defect the JVM suite could not
+
 
 `native_lazy_visible` asserted that a listing's contents appear on screen. They
 did not. The operator REPL pane rendered only the result *status*:
@@ -476,11 +512,11 @@ The one error is the same wrong guess both times. What changed is that the
 refusal now tells the model what shape it should have used, instead of only that
 something failed.
 
-## 10. A blocking defect: a session that edits cannot be resumed
+## 10. The blocking defect, and the recovery semantics that closed it
 
 Found by the PTY proof, and it is the most important result in this milestone.
 
-Resuming a session that had edited a file fails:
+Resuming a session that had edited a file failed:
 
 ```text
 A checkpoint form replay changed status
@@ -489,58 +525,173 @@ A checkpoint form replay changed status
  :actual-status :error}
 ```
 
-Computational replay rebuilds SCI state by **re-running the session's forms**,
+Computational replay rebuilt SCI state by **re-running the session's forms**,
 which assumes they can be run again. `project/edit` cannot: version anchoring
-makes re-application a conflict *by design*, so a form recorded `:ok` replays
-`:error` and recovery refuses the session.
+makes re-application a conflict *by design*, so a form recorded `:ok` replayed
+`:error` and recovery refused the session.
 
-Both halves are behaving correctly and the combination is unusable. Failing
-closed is right — it is not silent corruption and not a double write — but a
-durable session that changed a file is unresumable, and durability is the
-product. **A2 cannot be accepted with this open.**
+Both halves were behaving correctly and the combination was unusable. Failing
+closed was right — not silent corruption, not a double write — but a durable
+session that changed a file was unresumable, and durability is the product.
 
-### The fix, and the options
+### It was never only about edits
 
-This is a change to recovery semantics rather than to either capability. The
-journal already records each form's result, so the information needed is
-present; the question is what recovery does with it.
+The tempting fix is to special-case `project/edit`. That would have been wrong,
+because the same defect is already present in a read:
 
-**A. Reconstruct the result, do not re-execute.** For a form whose operation
-declares a world effect, bind its recorded result instead of running it again.
-Replay stops being "run the session again" and becomes "restore what the session
-computed", which is what it was always for. Cost: recovery must know which
-operations are effectful — the catalog already says so via `:effects` — and the
-reconstructed value must be the inert recorded one, so a session cannot resume
-holding a value the world no longer supports.
+```clojure
+(def x (project/read "config.edn"))
+```
 
-**B. Do not replay effectful forms at all, and mark the binding unavailable.**
-Simpler and stricter: `applied` would be unbound after resume, and the agent
-would have to re-observe. Cheaper to implement, worse to use, and it makes
-resume lossy in a way the operator has to notice.
+Re-running this on resume binds `x` to whatever `config.edn` says *now*. If the
+file changed while bbagent was stopped, the session silently resumes holding a
+value it never computed, and nothing anywhere says so. That is worse than the
+edit case, which at least failed loudly.
+
+The general statement is that **replay is not re-execution**. It is
+reconstruction of what a session computed. Those coincide exactly when a form is
+a function of its own inputs, and diverge the moment it observes or changes
+something outside itself.
+
+### What was built
+
+Record and replay at the **semantic operation boundary**, which is the one place
+that knows which is which:
+
+```text
+replay original Clojure/SCI source
+        │
+        ├── ordinary pure Clojure executes normally
+        │
+        └── world-touching semantic operations
+                   ↓
+             return recorded historical result
+             instead of re-observing/re-actuating
+```
+
+Nothing inspects the source. `defn`, `let`, branches, helpers defined in earlier
+forms and several operations inside one form all re-execute as ordinary Clojure;
+only the leaf calls are substituted. The example the design was written against:
+
+```clojure
+(defn bump [path]
+  (let [before (project/stat path)
+        text   (project/read path)]
+    (project/edit {:path path
+                   :base {:digest (:digest before)}
+                   :content (str text "!")})))
+
+(def bumped (bump "notes.txt"))
+```
+
+On resume, `bump` is redefined by running its `defn`, `bumped` is recomputed by
+running `bump` — and the `stat`, the `read` and the `edit` inside it return
+their receipts. The file is not read again and is not written again.
+
+### The transcript
+
+During evaluation, `bb4t.kernel/invoke-authorized` records one receipt per
+invocation, in order:
+
+```clojure
+{:operation/id  :project/edit
+ :capability/id :project/edit
+ :effects       #{:project/write}
+ :args/digest   "sha256:..."
+ :status        :ok
+ :result        {:path "notes.txt" :bytes 5 :digest "sha256:..."}
+ :result/digest "sha256:..."}
+```
+
+Four decisions in that shape are worth stating.
+
+**The caller owns the transcript.** `bb4t.context/evaluate` takes a handle the
+caller made and can read back afterwards, so the receipts survive a *failed*
+evaluation. That matters: `(do (project/edit ...) (/ 1 0))` changed the project
+and then failed, and without its receipt the replay would attempt the edit a
+second time.
+
+**Every operation is recorded, not only effectful ones.** The invariant then
+holds by construction rather than by trusting the effect annotation to be
+complete, and the ordering check covers every call. `:effects` is still carried
+on each receipt, because it is the metadata that decides what a *legacy* form
+may do (below).
+
+**Results are digested before the journal touches them.** The journal rewrites
+large strings as content references and strips entries that look like
+credentials. The first is lossless and the second is not, so the coordinate is
+taken at the boundary; a result that came back changed fails closed rather than
+being reconstructed wrong.
+
+**Argument digests are total.** `bb4t.canonical/lenient-coordinate` never
+rejects. A caller can legitimately write `(project/read 1.5)`, and the call that
+refuses it still has to be identifiable in a transcript.
+
+### Storage: the existing machinery, and one thing it could not carry
+
+Receipts are journalled as `:repl/operations` on the `:repl/result` event, so
+`store/externalize` blobs a large `project/read` result through the existing CAS
+with no second persistence mechanism. A 78 KB read survives a restart and
+replays as the whole historical string, not a preview of it.
+
+They are deliberately **not** in the checkpoint. `checkpoint!` rewrites the
+entire replay-form vector on every evaluation, so a form's recorded results
+would be copied once more into every checkpoint after it — quadratic in the
+bytes those results occupy, which for a few hundred forms of listings is
+hundreds of megabytes. Checkpoint entries carry the `:request/id` instead and
+recovery finds the receipts through `store/result-event`, a bounded lookup
+mirroring the existing `request-event`. The pre-existing quadratic growth in
+*source* bytes is untouched and remains a nonclaim.
+
+### Fail closed, and check the transcript before the status
+
+Replay refuses on operation mismatch, argument mismatch, a transcript consumed
+too far, a transcript not consumed far enough, a result that did not survive
+storage, a result too opaque to reconstruct, and a legacy form that would
+actuate.
+
+The ordering matters more than it looks. Consider a replay that diverges to
+`(project/read "absent.txt")` where the session recorded
+`(project/read "missing.txt")`. Both fail. A status check alone passes it and
+the session resumes on a reconstruction that is not its history. The transcript
+is what notices, so it is checked first. That case is pinned by test.
+
+### Sessions recorded before receipts existed
+
+A0, A1 and A1.1 sessions have no transcript, and pretending otherwise would be
+exactly the dishonesty this repair exists to remove. They replay in a third
+mode, decided by capability metadata rather than by a list of operation names:
+
+- an **observation** effect re-executes against the live world, and is counted;
+- an **actuation** effect fails closed, because there is no receipt saying the
+  change was already made;
+- the resume event records `:exact? false` with which operations were
+  re-observed.
+
+So an A0 read-only session still resumes exactly as it always did, and says
+plainly that its reconstruction consulted today's project. `bb4t.catalog/effects`
+carries the classification and `validate-catalog` rejects a capability that
+declares an unclassified effect, so a future capability cannot be added and then
+silently re-executed during recovery.
+
+### The options that were not taken
+
+**B. Skip effectful forms and leave the binding unbound.** Cheaper, and it makes
+resume lossy in a way the operator has to notice and work around. Rejected: it
+answers "can this session be resumed" with "partly".
 
 **C. Snapshot SCI state instead of replaying forms.** Removes the class of
-problem rather than this instance, and is the largest change of the three. The
-S0b debt notes already contemplate it; A2 is the wrong place to start it.
-
-**Recommendation: A.** It preserves the existing model, uses evidence the
-journal already holds, and keeps `:effects` meaningful — an operation that
-declares a world effect is exactly one that must not be re-executed to rebuild
-memory. B is the fallback if A proves awkward; C should be its own milestone if
-it is ever wanted.
-
-Deliberately not attempted at the end of a long change: it needs its own step
-and its own evidence.
-
-Pinned by `a-session-that-edited-cannot-be-resumed-test` so it cannot regress
-silently or be forgotten while it is open.
+problem rather than this instance, and is a checkpoint redesign. Out of scope
+here, and still available as its own milestone.
 
 ## 11. Native and PTY evidence for the write surface
 
-Thirty gates pass against an image built at bb4t `f3547d02` and bbagent
-`1149e0d5`, rebuilt so the image matches the runtime source rather than trailing
-it by one change. Commits after `1149e0d5` touch only `docs/` and `artifacts/`. In the image, `:project-edit-anchored :ok` and
-`:project-edit-conflict-refused :ok` sit alongside all 35 authority negatives
-with `:projected-class-count 0`.
+Thirty gates passed against an image built at bb4t `f3547d02` and bbagent
+`1149e0d5`. Superseded by section 13, which records 37 gates against the image
+that carries the recovery repair; this section is kept for the harness findings
+below, which are about how the proof was built rather than about that image. In
+that image `:project-edit-anchored :ok` and `:project-edit-conflict-refused :ok`
+sat alongside all 35 authority negatives with `:projected-class-count 0`.
 
 ### The proof was measuring the wrong thing
 
@@ -577,14 +728,134 @@ test I wrote for it failed against the old code. It did not — the pane never
 overflowed. The guard is still worth keeping, but it explained nothing, and
 saying so is the difference between a fix and a coincidence.
 
-## 12. Next
+## 12. Product claims reconciled with runtime behaviour
 
-**Effectful replay first** — section 10. `project/test` after that, where the
-question is what counts as verification rather than what counts as running a
-command.
+Three statements in the product were false against what it actually does. All
+three are the same failure — prose asserting a capability boundary that code had
+moved — and A1.1 recorded it as an A2 entry condition after finding absent
+authority hardcoded in three places.
+
+**The static system prompt denied editing authority the default profile grants.**
+`resources/bbagent/system.txt` said *"You have no editing, shell, process,
+network, or host API authority in the REPL"* while `:agent/project-develop`,
+the session default, projects `project/edit`. It now states closure rather than
+absence — the projected operations are the whole authority, nothing outside them
+is reachable — which is capability-independent and cannot be falsified by
+granting anything. What the model can specifically do is left to the `:derived`
+orientation, which generates it from the Context's own description.
+
+That prompt is the digest anchor for the recorded A1.1 coordinates, so the
+change moves the anchor. That is the correct trade: A1.1's own review named this
+sentence as the thing A2 would falsify, and the recorded A1.1 evidence keeps
+naming the text it was measured against.
+
+**`session/start!`'s docstring said the default profile was
+`:agent/project-survey`.** The code has defaulted to `:agent/project-develop`
+since the write surface landed. So did the CLI usage text. Both corrected.
+
+**`CURRENT_SCOPE.md` listed `project/search` and `project/edit` as not
+implemented.** Both shipped in this milestone. Reconciled.
+
+## 13. Evidence for the recovery repair
+
+Coordinates in `artifacts/a2-replay-evidence.edn`. Built by `script/build-native`
+from bb4t `cc18ca7b` and bbagent `c23b3163`, producing a 75,565,312-byte image.
+**No reachability metadata, build flag, or dependency was added**; recovery
+semantics changed and the model's surface did not, which the 35 authority
+negatives and `:projected-class-count 0` still hold alongside.
+
+### Deterministic
+
+bbagent 149 tests / 1170 assertions, bb4t 25 tests / 198 assertions, zero
+failures. `test/bbagent/replay_test.clj` covers the acceptance cases: a pure
+form; a `def` of a read whose file changed while the process was stopped; list,
+search and stat against a changed world; an edit not issued twice; an edit's
+result binding reconstructed; a helper containing stat, read and edit; a replay
+that calls a different operation, calls one with different arguments, calls too
+many, and calls too few; a receipt nothing consumed; a 78 KB read through CAS; a
+session with no receipts at all. The observing and editing cases run against
+both storage backends.
+
+`a-session-that-edited-cannot-be-resumed-test` was the pin on the open defect.
+It has become `a-session-that-edited-resumes-without-editing-again-test`, which
+asserts the property rather than the failure.
+
+### Native
+
+`script/build-native` now gates on a replay scenario in the image: a session
+reads `README.md` and applies an anchored appending edit, the README is
+rewritten underneath it, and a second process resumes. The build fails unless
+the file it wrote is unchanged, the reconstructed observation is the text the
+session recorded, the *current* README text appears nowhere in the resumed
+session, and the resume claims `:exact? true` with three forms reconstructed and
+none legacy.
+
+### PTY
+
+37 gates, all passing. The write session is now **resumed at a terminal**, which
+the previous proof deliberately did not attempt — its comment said so, because a
+session that edited could not be resumed. Three new journal gates assert that
+the edit's own result comes back (`REPLAYED-6`), that the file it wrote was not
+written again (`UNCHANGED-twotwo`), and that the session recorded an exact
+reconstruction.
+
+### Live model
+
+`script/a2-live-replay.clj`, one session, two processes, same model and endpoint
+as the rest of the milestone. Asked to change `spacing` from 7 to 11 and to
+retain the result, the model read the file, guessed `:base` as its content, was
+refused, ran `project/stat`, applied the anchored edit, and retained it. The
+process exited.
+
+A second process resumed and was asked for a value it could only have from the
+first process's computation:
+
+```text
+The value of `(:bytes applied)` is 137.
+
+{:exact? true :forms 6 :legacy 0 :reconstructed 6 :reobserved []}
+```
+
+Six forms reconstructed, including both the failed edit and the successful one,
+and the edited file byte-identical across the restart. That is the scenario the
+milestone is about — stop for the day, pick the session back up — and it was
+impossible before this repair.
+
+### What is still not claimed
+
+Added to section 6, and stated in the evidence artifact:
+
+- **a capability declaring no effects is assumed pure.** The catalog states that
+  contract and validates that every declared effect is classified; it does not
+  prove that an unannotated operation is a function of its arguments;
+- **a result the journal's secret-stripping alters cannot be reconstructed.**
+  Such a session fails closed on resume rather than resuming with a different
+  value. Only `data.json/read` can produce such a result today, and the choice
+  between refusing and widening what the journal retains is a real one that this
+  repair did not make;
+- **checkpoints still rewrite every form's source.** Receipts were kept out of
+  the checkpoint precisely to avoid making that worse; the pre-existing growth
+  in source bytes is untouched;
+- **one live repetition.** The live scenario demonstrates the path end to end.
+  It is not a measurement.
+
+## 14. Next
+
+**A2 is closed.** The milestone question — can the model do real project work
+through a small composable semantic capability set while retaining persistent
+SCI as its interface — is answered for observation, for a version-anchored
+change, and now for durability across a restart.
+
+`project/test` is the natural next milestone, where the question is what counts
+as verification rather than what counts as running a command. It was
+deliberately excluded from this repair.
 
 Two smaller items the dogfood surfaced and did not fix: a broad search returns
 matches from `artifacts/` and `docs/` that crowd out source, which is an
 argument for the model narrowing with `:path` rather than for a host-side
 default; and `project/read` still previews only 2,048 characters of a large
 file, so the model reads a big source file in slices.
+
+One item this repair surfaced and did not fix: the checkpoint's quadratic
+source growth, which is an argument for the state-snapshot design that section
+10 declined to start here.

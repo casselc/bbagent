@@ -1,12 +1,11 @@
 # Current Scope: A2
 
 **For review.** `docs/A2_FINDINGS.md` section 0 is the reviewer's entry point:
-verdict, evidence table, the blocking defect, and the decisions it needs. This
-document states scope; that one states results.
-
+verdict, evidence table, and the decisions it needs. This document states scope;
+that one states results.
 
 **Milestone status:** A0 PASS, S0a PASS, S0b PASS, A1 PASS, A1.1 PASS
-(frozen at `bbagent-a1.1`), A2 ACTIVE.
+(frozen at `bbagent-a1.1`), A2 complete, recommended PASS.
 
 ## A2: useful semantic project world
 
@@ -24,70 +23,79 @@ that specific report.
 - **`project/search`** (bb4t): regex over file contents returning
   `{:path :line :text}`, same traversal rules, skipping non-UTF-8 files, with a
   measured per-line matching budget.
-- **`:agent/project-survey`**: a new profile carrying the A0 authority plus
-  listing. `:agent/project-read` is frozen and still reproduces the recorded
-  A0/A1/A1.1 surface exactly, which is pinned by test.
-- **Profile selection in bbagent**: `session/start!` takes `:profile` and
-  defaults to the survey profile; `resume!` inherits the profile recorded in
-  the session's start coordinate, so an A0-era session is never resumed into a
-  wider surface where a replayed form that once failed would now succeed.
-- **`:derived` orientation is now the default**, replacing `:grounded`. This
-  was forced rather than chosen: `:grounded` states limits as prose, including
-  "you cannot enumerate a directory", which became false the moment
-  `project/list` was granted. `:derived` generates its claims from the surface,
-  so it picked up the new operation with no prompt edit and denies nothing the
-  context grants.
+- **`project/stat`** (bb4t): `{:path :kind :bytes :digest}`, or `:absent`. The
+  digest is the coordinate an edit anchors to.
+- **`project/edit`** (bb4t): version-anchored mutation. An edit must state the
+  version it believed; a stale base is refused as a conflict rather than
+  applied, and there is no way to spell a blind overwrite. Compare-and-swap by
+  observation, not atomically — see the nonclaims.
+- **Durable replay semantics** (bb4t + bbagent): recovery reconstructs a
+  session's computational state without re-observing or re-actuating the
+  project. Each evaluation records the semantic operations it invoked; recovery
+  re-executes the Clojure and substitutes those recordings at the operation
+  boundary, failing closed on any divergence. This closed the milestone's one
+  blocking defect and generalized it: re-running a recorded `project/read` was
+  as wrong as re-running a recorded `project/edit`.
+- **Three capability profiles**: `:agent/project-read` is frozen and still
+  reproduces the recorded A0/A1/A1.1 surface exactly, pinned by test;
+  `:agent/project-survey` adds listing, search and stat and stays read-only;
+  `:agent/project-develop` adds `project/edit` and is the session default.
+  `resume!` inherits the profile recorded in the session's start coordinate, so
+  an A0-era session is never resumed into a wider surface.
+- **`:derived` orientation is the default**, replacing `:grounded`. This was
+  forced rather than chosen: `:grounded` states limits as prose, including "you
+  cannot enumerate a directory", which became false the moment `project/list`
+  was granted. `:derived` generates its claims from the surface, so it picked up
+  each new operation with no prompt edit and denies nothing the context grants.
+- **Product claims reconciled with runtime behaviour**: the static base prompt
+  no longer denies editing authority the default profile grants, and states
+  closure rather than absence so it cannot go stale again. Stale profile
+  defaults in the `session/start!` docstring and the CLI usage text are
+  corrected.
 
 ### Delivered by the dogfood
 
-Three defects that only appeared from using it, all fixed; see
-`docs/A2_FINDINGS.md`:
+Defects that only appeared from using it, all fixed; see `docs/A2_FINDINGS.md`:
 
 - the twelve-action turn budget was sized for a read-only surface and cut the
   model off as it reached the file it had navigated to correctly;
 - an oversized value reported its size and no content, so `project/read` was
   effectively unusable above ~4KB;
 - the bounded vocabulary was 26 symbols with no `fn` or `defn`, so the agent
-  could not compose helpers at all.
+  could not compose helpers at all;
+- a refusal reached the model as its category alone, with the kernel's own
+  diagnostic message thrown away.
 
 ### Evidence status
 
-- deterministic suites: bbagent 131 tests / 924 assertions, bb4t 18 tests /
-  167 assertions including the 96-case authority corpus, 0 failures;
+- deterministic suites: bbagent 149 tests / 1170 assertions, bb4t 25 tests /
+  198 assertions including the 96-case authority corpus, 0 failures;
 - live comparison, 3 repetitions per arm, arms alternated: complete answers
   0/3 before, 3/3 after, with zero REPL errors after;
 - live self-dogfood against this repository: 13 actions / 5 errors before the
   fixes, 6 actions / 0 errors after;
+- live edit → process exit → resume → continue: six forms reconstructed
+  exactly across a process boundary, the edited file byte-identical;
 - native image built from local coordinates with **no new reachability
   metadata, build flag, or dependency**; authority in the image shows the A2
   grants with `:projected-class-count 0` and `:supplied-import-count 0`
-  alongside all 35 negatives;
-- **25 PTY gates pass**, eight of them new for A2, including the operator REPL
-  driving both capabilities natively and an agent-authored helper surviving
-  resume. The gate found a defect the suite could not: the REPL pane rendered
-  only the result status, never the value.
-
-### Blocking
-
-**A session that edits a file cannot be resumed.** Replay re-executes the edit
-against a world it already changed; version anchoring correctly refuses it, and
-recovery correctly refuses the session. Both halves are right and the
-combination is unusable. The fix is to reconstruct an effectful form's recorded
-result rather than re-execute it. Pinned by test; see `docs/A2_FINDINGS.md`
-section 10. **A2 cannot be accepted until this is closed.**
+  alongside all 35 negatives, and the build gates on a replay scenario that
+  proves neither the observation nor the change is repeated;
+- **37 PTY gates pass**, including resuming a session that edited a file — which
+  the previous proof deliberately did not attempt, because it was impossible.
 
 ### Still open in A2
 
-`project/search`, `project/edit` with version-anchored mutation, and
-`project/test` are not implemented. Neither is any shell, process, or Git
-capability. The measurement target also needs revisiting: the harness's
+Nothing blocking. `project/test` is deliberately excluded and is the natural
+next milestone. Neither is any shell, process, or Git capability. The
+measurement target also needs revisiting: the A1.1 harness's
 `concludes-limitation?` scored the right answer while enumeration was missing,
 and now scores the wrong thing.
 
-`resources/bbagent/system.txt` still carries one enumerated-absence sentence.
-It remains true -- no editing, shell, process, or network authority exists --
-and it is the digest anchor for the recorded A1.1 prompt coordinates, so it
-changes when a capability actually falsifies it.
+Three nonclaims a reviewer should weigh before accepting: `project/edit` is
+compare-and-swap by observation; the expanded `base-allow` is argued pure and
+corpus-checked rather than proved; and a capability declaring no effects is
+assumed to be a pure function of its arguments.
 
 ---
 
