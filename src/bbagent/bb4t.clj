@@ -91,8 +91,14 @@
   (try
     {:status :ok :evaluation (context/evaluate context source)}
     (catch Throwable failure
-      {:status :error
-       :error (ex-data (errors/normalize-bb4t failure))})))
+      ;; The message is the diagnostic. Dropping it made a refusal say only
+      ;; that something failed, so the model had to guess at the shape it got
+      ;; wrong instead of being told. bb4t's failure messages are authored
+      ;; strings and interpolate no host path.
+      (let [normalized (errors/normalize-bb4t failure)]
+        {:status :error
+         :error (assoc (ex-data normalized)
+                       :error/message (ex-message normalized))}))))
 
 (defn subscribe! [{:keys [runtime]} subscriber]
   (events/subscribe runtime subscriber))

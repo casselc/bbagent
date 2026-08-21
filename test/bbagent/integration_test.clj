@@ -2,6 +2,7 @@
   (:require [bb4t.context :as context]
             [bb4t.runtime :as runtime]
             [bbagent.bb4t :as app-runtime]
+            [bbagent.errors :as errors]
             [bbagent.sqlite :as sqlite]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]])
@@ -462,3 +463,33 @@
     (let [app (app-runtime/create (edit-project) :agent/project-read)]
       (is (denied? app "(project/stat \"a.txt\")"))
       (is (denied? app "(project/edit {:path \"a.txt\" :base :absent :content \"x\"})")))))
+
+(deftest failures-tell-the-model-what-was-wrong-test
+  (testing "a refusal carries its message, not merely its category"
+    ;; The A2 edit dogfood watched the model guess :base wrong, receive
+    ;; :bb4t-evaluation-failure with an empty data map, and spend an action on
+    ;; (doc project/edit) to learn what the refusal already knew.
+    (let [app (app-runtime/create (edit-project))
+          failure #(:error (app-runtime/evaluate app %))]
+      (let [e (failure "(project/edit {:path \"a.txt\" :content \"blind\"})")]
+        (is (str/includes? (:error/message e) ":base"))
+        (is (str/includes? (:error/message e) "blind overwrite")))
+      (testing "SCI's own refusals come through too"
+        (is (str/includes? (:error/message (failure "(slurp \"x\")"))
+                           "slurp")))
+      (testing "a conflict reports what it expected and what it found"
+        ;; So the model can re-anchor without a second stat.
+        (let [e (failure (str "(project/edit {:path \"a.txt\" "
+                              ":base {:digest \"sha256:00\"} :content \"y\"})"))
+              data (get-in e [:error/data :bb4t/data])]
+          (is (true? (:bbagent/conflict data)))
+          (is (= "sha256:00" (:conflict/expected data)))
+          (is (str/starts-with? (:conflict/observed data) "sha256:"))
+          (is (= "a.txt" (:path data)))))
+      (testing "the diagnostic set is an allowlist, so nothing else leaks"
+        (let [data (get-in (failure "(project/read \"../escape\")")
+                           [:error/data :bb4t/data])]
+          (is (every? (set errors/bb4t-diagnostic-keys) (keys data))
+              "every surfaced key must be one someone decided was safe")
+          (is (= "../escape" (:path data))
+              "paths are as the caller wrote them, never resolved to the host"))))))

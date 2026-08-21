@@ -241,8 +241,10 @@
         body
         (cond
           (= :error (:status result))
-          (str ":error " (name (or (get-in result [:error :bbagent/error])
-                                   :unknown)))
+          (str ":error "
+               (name (or (get-in result [:error :bbagent/error]) :unknown))
+               (when-let [m (get-in result [:error :error/message])]
+                 (str " " m)))
 
           (contains? value :value/data)
           (pr-str (:value/data value))
