@@ -1,9 +1,56 @@
 # A2 Findings (in progress): Useful Semantic Project World
 
-Status: **A2 active, and blocked on one defect.** `project/list`,
-`project/search`, `project/stat` and `project/edit` are delivered, dogfooded,
-and proved natively. A session that edits a file cannot be resumed (section 10);
-A2 cannot be accepted until that is fixed.
+**Status: A2 active, blocked on one defect. Not ready to accept.**
+
+## 0. For review
+
+Four capabilities are delivered, dogfooded against a live model, and proved in a
+native image: `project/list`, `project/search`, `project/stat`, `project/edit`.
+The milestone question is answered in the affirmative for observation and for a
+single anchored change. It is **not** answered for durable work, because of one
+defect.
+
+### The blocking defect
+
+**A session that edits a file cannot be resumed.** Replay rebuilds SCI state by
+re-running the session's forms; `project/edit` cannot be re-run, because version
+anchoring makes re-application a conflict by design. A form recorded `:ok`
+replays `:error` and recovery refuses the session. Both halves are correct and
+the combination is unusable. Detail and options in section 10.
+
+### What the evidence covers
+
+| Evidence | Result |
+|---|---|
+| bbagent deterministic suite | 141 tests, 1013 assertions, 0 failures |
+| bb4t deterministic suite | 18 tests, 167 assertions, 0 failures, incl. 96-case authority corpus |
+| Native image | built; A2 grants present, 35 authority negatives denied, `:projected-class-count 0` |
+| PTY proof | 30 gates pass |
+| Live model, fixture comparison | complete answers 0/3 before `project/list`, 3/3 after |
+| Live model, this repository | orientation question 13→6 actions; budget question 4 actions; edit task 8→5 actions |
+
+### Decisions this needs
+
+1. **Fix effectful replay before anything else?** Recommended. Section 10 states
+   the shape of the fix; it is a recovery-semantics change, not a capability
+   change.
+2. **Is `:agent/project-develop` the right default?** Sessions now default to a
+   profile that can write. `:agent/project-survey` remains read-only and
+   `:agent/project-read` remains the frozen A0 surface.
+3. **Should `project/test` follow, or should A2 close after the fix?** The
+   milestone question is arguably already answered for the read surface.
+4. **Is compare-and-swap by observation good enough?** `project/edit` reads,
+   compares, then renames; a writer inside that window is not detected.
+
+### What changed that a reviewer should not have to discover
+
+- the default orientation is now `:derived`, not the `:grounded` that A1.1
+  measured, because granting `project/list` made `:grounded`'s prose false;
+- the per-turn action budget moved from 12 to 40;
+- `base-allow` grew from 26 symbols to a reviewed pure set including `fn` and
+  `defn`, argued pure and corpus-checked rather than proved (section 6);
+- failure messages now reach the model, filtered by an allowlist;
+- sessions default to a profile with write authority.
 
 ## 1. The question
 
@@ -148,24 +195,33 @@ the argument for treating a stale-prone constant as a defect rather than a note.
 
 ## 6. Nonclaims
 
-- one model, one endpoint, three repetitions per arm. Directional, not a
-  benchmark. The 0/3-versus-3/3 completeness difference is large enough to read
-  through the noise; the attempts means are not a result;
-- the self-dogfood is a single session per configuration, not a repeated
-  measurement. It is evidence that the defects were real and that the fixes
-  changed behaviour, not a quantified improvement;
-- **no native or PTY evidence for any A2 change.** The bb4t changes touch value
-  description and the allow-list, not the build, but that is an inference until
-  the native build runs;
-- the expanded `base-allow` is argued pure and corpus-checked, not proved. The
-  corpus tests the denials that exist; it cannot show that no pure-looking
-  symbol has a path to authority;
-- `project/search`, `project/edit`, and `project/test` do not exist, so nothing
-  here shows whether the composable-capability thesis holds for tasks that
-  change the world rather than observe it;
-- `concludes-limitation?` in the A1.1 harness now measures the wrong thing: it
-  scored the right answer while enumeration was missing. The A2 harness measures
-  answer completeness against known ground truth instead.
+Current as of `project/edit`; supersedes anything narrower said earlier.
+
+- **one model, one endpoint, few repetitions.** Every live number here is
+  directional. The fixture comparison is three repetitions per arm; the
+  self-dogfoods are single sessions. The 0/3-versus-3/3 completeness difference
+  is large enough to read through the noise. The action counts are not a
+  benchmark, and one of them moved the wrong way once (section 7);
+- **the expanded `base-allow` is argued pure and corpus-checked, not proved.**
+  The 96-case authority corpus tests the denials that exist; it cannot show that
+  no pure-looking symbol has a path to authority. This is the largest unproved
+  claim in the milestone;
+- **`project/edit` is compare-and-swap by observation, not atomically.** The
+  digest is read, compared, and then the rename happens. A writer that changes
+  the file inside that window is not detected;
+- **no JVM/native suite parity.** The native evidence is the smoke, the
+  authority corpus, and the PTY gates — not the 141-test suite;
+- **Linux x86_64 glibc only.** No cross-platform or static-linking claim;
+- **the image digest is an artifact identifier, not a reproducibility claim.**
+  Two builds of identical source produced identical size, identical behaviour,
+  and different digests (section 8);
+- **no `project/test`,** so nothing here shows whether the composable-capability
+  thesis holds for verification;
+- **the PTY gates prove an operator can drive the interface,** not that the
+  rendering is correct in every terminal. Semantic claims are asserted against
+  the durable journal instead, for the reason in section 11;
+- **`concludes-limitation?` in the A1.1 harness now measures the wrong thing.**
+  It scored the right answer while enumeration was missing.
 
 ## 7. `project/search`
 
@@ -443,11 +499,37 @@ closed is right — it is not silent corruption and not a double write — but a
 durable session that changed a file is unresumable, and durability is the
 product. **A2 cannot be accepted with this open.**
 
-The fix is a change to recovery semantics rather than to either capability: an
-effectful form's recorded *result* should be reconstructed rather than the form
-re-executed. The journal already holds the result. That is deliberately not
-attempted here at the end of a long change; it needs its own step and its own
-evidence.
+### The fix, and the options
+
+This is a change to recovery semantics rather than to either capability. The
+journal already records each form's result, so the information needed is
+present; the question is what recovery does with it.
+
+**A. Reconstruct the result, do not re-execute.** For a form whose operation
+declares a world effect, bind its recorded result instead of running it again.
+Replay stops being "run the session again" and becomes "restore what the session
+computed", which is what it was always for. Cost: recovery must know which
+operations are effectful — the catalog already says so via `:effects` — and the
+reconstructed value must be the inert recorded one, so a session cannot resume
+holding a value the world no longer supports.
+
+**B. Do not replay effectful forms at all, and mark the binding unavailable.**
+Simpler and stricter: `applied` would be unbound after resume, and the agent
+would have to re-observe. Cheaper to implement, worse to use, and it makes
+resume lossy in a way the operator has to notice.
+
+**C. Snapshot SCI state instead of replaying forms.** Removes the class of
+problem rather than this instance, and is the largest change of the three. The
+S0b debt notes already contemplate it; A2 is the wrong place to start it.
+
+**Recommendation: A.** It preserves the existing model, uses evidence the
+journal already holds, and keeps `:effects` meaningful — an operation that
+declares a world effect is exactly one that must not be re-executed to rebuild
+memory. B is the fallback if A proves awkward; C should be its own milestone if
+it is ever wanted.
+
+Deliberately not attempted at the end of a long change: it needs its own step
+and its own evidence.
 
 Pinned by `a-session-that-edited-cannot-be-resumed-test` so it cannot regress
 silently or be forgotten while it is open.

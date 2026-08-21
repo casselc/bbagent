@@ -1,5 +1,10 @@
 # Current Scope: A2
 
+**For review.** `docs/A2_FINDINGS.md` section 0 is the reviewer's entry point:
+verdict, evidence table, the blocking defect, and the decisions it needs. This
+document states scope; that one states results.
+
+
 **Milestone status:** A0 PASS, S0a PASS, S0b PASS, A1 PASS, A1.1 PASS
 (frozen at `bbagent-a1.1`), A2 ACTIVE.
 

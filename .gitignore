@@ -2,3 +2,5 @@
 /.clj-kondo/
 /target/
 /.bbagent/
+__pycache__/
+*.pyc
