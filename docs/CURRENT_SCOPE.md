@@ -30,16 +30,27 @@ that specific report.
   so it picked up the new operation with no prompt edit and denies nothing the
   context grants.
 
+### Delivered by the dogfood
+
+Three defects that only appeared from using it, all fixed; see
+`docs/A2_FINDINGS.md`:
+
+- the twelve-action turn budget was sized for a read-only surface and cut the
+  model off as it reached the file it had navigated to correctly;
+- an oversized value reported its size and no content, so `project/read` was
+  effectively unusable above ~4KB;
+- the bounded vocabulary was 26 symbols with no `fn` or `defn`, so the agent
+  could not compose helpers at all.
+
 ### Evidence status
 
-- deterministic suite: 120 tests, 882 assertions, 0 failures;
-- authority boundary tests for `project/list` cover root listing, non-recursion,
-  absolute paths, `..` traversal, symlink refusal in both directions,
-  non-directories, absent paths, malformed arguments, and the grant itself;
-- **not yet done:** native build and PTY evidence for the new capability; a live
-  dogfood re-run of the A1.1 prompt against the widened surface. The A1.1
-  comparison harness now interleaves and rotates variants and includes
-  `:derived`, so the re-run is ready when an endpoint is.
+- deterministic suites: bbagent 122 tests / 889 assertions, bb4t 18 tests /
+  164 assertions including the 96-case authority corpus, 0 failures;
+- live comparison, 3 repetitions per arm, arms alternated: complete answers
+  0/3 before, 3/3 after, with zero REPL errors after;
+- live self-dogfood against this repository: 13 actions / 5 errors before the
+  fixes, 6 actions / 0 errors after;
+- **not yet done:** native build and PTY evidence for any A2 change.
 
 ### Still open in A2
 

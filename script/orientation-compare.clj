@@ -156,6 +156,6 @@
                (pr-str (summarize (filter #(= variant (:variant %)) observations)))))
     (println)
     (println "=== observations ===")
-    (spit "orientation-observations.edn"
+    (spit "artifacts/orientation-observations.edn"
           (with-out-str (pprint/pprint (vec observations))))
-    (println "written to orientation-observations.edn")))
+    (println "written to artifacts/orientation-observations.edn")))
