@@ -1,4 +1,7 @@
 {:milestone :a1.1
+ :coordinate {:repository "bbagent"
+              :tag "bbagent-a1.1"
+              :bb4t-change-required? false}
  :question "Can the model discover and use its granted surface when oriented to apropos/doc and a generated capability preamble?"
  :result :pass
  :caveat "orientation fixed discovery but not unsupported claims; a fourth variant constraining assertions was required"

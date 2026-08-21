@@ -1,7 +1,7 @@
 # Current Scope: A1.1
 
 **Milestone status:** A0 PASS, S0a PASS, S0b PASS, A1 PASS (accepted with
-follow-ups), A1.1 PASS, reviewed and closed.
+follow-ups), A1.1 PASS, reviewed, accepted, and frozen at `bbagent-a1.1`.
 
 A1.1 findings are in `docs/A1_1_FINDINGS.md`, with the review recorded in its
 section 10. The review upheld the verdict, fixed three defects, and corrected
@@ -17,6 +17,18 @@ exists. They must derive from the effects the context actually grants. See
 
 A1 is complete and frozen at `bbagent-a1`. Its findings are in
 `docs/A1_FINDINGS.md`.
+
+## Frozen coordinates
+
+| Milestone | Repository | Tag |
+|---|---|---|
+| A1 | bbagent | `bbagent-a1` |
+| A1.1 | bbagent | `bbagent-a1.1` |
+| A1 / A1.1 | bb4t | `bb4t-s0a`, unchanged |
+
+A1.1 required no bb4t change, as its scope predicted. bb4t's last A1.1-relevant
+coordinate is the S0a application build profile plus the A1 `charm.clj`
+dependency; no new bb4t tag exists because no bb4t source changed.
 
 ## A1.1: capability orientation
 
