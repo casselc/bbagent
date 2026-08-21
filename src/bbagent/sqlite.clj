@@ -263,14 +263,19 @@
         _ (ensure! (not (Files/exists forbidden (make-array LinkOption 0)))
                    "Authority probe path already exists"
                    {:database (str forbidden)})
-        app (app-runtime/create project-root)
+        ;; Pinned explicitly: the probe's whole claim is that trusted SQLite
+        ;; reachability does not widen this exact surface, so the surface it
+        ;; compares against must be named rather than inherited.
+        profile app-runtime/default-profile
+        app (app-runtime/create project-root profile)
         description (:context/description app)
         positives
         {:core (app-runtime/evaluate app "(+ 1 2)")
          :json-read (app-runtime/evaluate app
                                           "(data.json/read \"{\\\"ok\\\":true}\")")
          :json-write (app-runtime/evaluate app "(data.json/write {\"ok\" true})")
-         :project-read (app-runtime/evaluate app "(project/read \"README.md\")")}
+         :project-read (app-runtime/evaluate app "(project/read \"README.md\")")
+         :project-list (app-runtime/evaluate app "(project/list \".\")")}
         negatives (into (sorted-map)
                          (map (fn [[probe source]]
                                 [probe (app-runtime/evaluate app source)]))
@@ -279,10 +284,10 @@
     (ensure! (= authority-negative-count (count negatives))
              "SQLite authority probe count changed"
              {:expected authority-negative-count :actual (count negatives)})
-    (ensure! (= app-runtime/context-spec (:context/spec description))
+    (ensure! (= (app-runtime/context-spec profile) (:context/spec description))
              "SQLite changed the bounded ContextSpec"
              {:context/spec (:context/spec description)})
-    (ensure! (= app-runtime/capabilities
+    (ensure! (= (app-runtime/capabilities profile)
                 (get-in description [:context/effective :context/grants]))
              "SQLite changed effective Context grants"
              {:context/effective (:context/effective description)})

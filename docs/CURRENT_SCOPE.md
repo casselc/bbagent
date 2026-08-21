@@ -1,72 +1,62 @@
-# Current Scope: A1.1
+# Current Scope: A2
 
-**Milestone status:** A0 PASS, S0a PASS, S0b PASS, A1 PASS (accepted with
-follow-ups), A1.1 PASS, reviewed, accepted, and frozen at `bbagent-a1.1`.
+**Milestone status:** A0 PASS, S0a PASS, S0b PASS, A1 PASS, A1.1 PASS
+(frozen at `bbagent-a1.1`), A2 ACTIVE.
 
-A1.1 findings are in `docs/A1_1_FINDINGS.md`, with the review recorded in its
-section 10. The review upheld the verdict, fixed three defects, and corrected
-three claims. New sessions now default to `:grounded`; a resumed session keeps
-the orientation it was started with unless that run overrides it.
+## A2: useful semantic project world
 
-## A2 entry condition: partly satisfied
+A2 asks whether the model can do real project work through a small composable
+semantic capability set while keeping persistent SCI as its working interface.
 
-A2 is not open. Its entry condition, carried out of the A1.1 review, is that
-**absent authority is asserted as a hardcoded constant in three places** — the
-base system prompt, the generated preamble, and the grounding constraint — all
-of which become false the moment `project/list` exists.
+A1.1 produced the entry signal: the model discovers its surface and correctly
+reports that directory enumeration is missing. `project/list` is the answer to
+that specific report.
 
-**What the investigation changed.** The condition originally said these claims
-must derive from the effects the context grants. They cannot. The runtime's
-`:compiled/capabilities` equals its authorized grants exactly, so the
-description knows only what the context *has*; there is no wider universe to
-subtract from and therefore no way to derive "you have no file listing". Asking
-bb4t for one would have meant teaching the runtime about capabilities it was not
-compiled with.
+### Delivered
 
-The fix is to stop asserting absence. **Closure is derivable and absence is
-not**, and closure carries the same practical meaning: "these N operations are
-your whole authority, anything not in the list is unavailable" entails "you have
-no file listing" for the A0 surface, while staying true of every other surface.
+- **`project/list`** (bb4t): one directory deep, sorted inert data, symbolic
+  links described but never followed, bounded by `:project/list-max-entries`.
+- **`:agent/project-survey`**: a new profile carrying the A0 authority plus
+  listing. `:agent/project-read` is frozen and still reproduces the recorded
+  A0/A1/A1.1 surface exactly, which is pinned by test.
+- **Profile selection in bbagent**: `session/start!` takes `:profile` and
+  defaults to the survey profile; `resume!` inherits the profile recorded in
+  the session's start coordinate, so an A0-era session is never resumed into a
+  wider surface where a replayed form that once failed would now succeed.
+- **`:derived` orientation is now the default**, replacing `:grounded`. This
+  was forced rather than chosen: `:grounded` states limits as prose, including
+  "you cannot enumerate a directory", which became false the moment
+  `project/list` was granted. `:derived` generates its claims from the surface,
+  so it picked up the new operation with no prompt edit and denies nothing the
+  context grants.
 
-**Implemented:** a fifth orientation variant, `:derived`, whose closing states
-closure over the actual projections and whose claim constraint refers
-structurally to the generated list rather than naming any capability. Pinned by
-tests that build an A2-shaped context granting `project/list` and assert that
-`:grounded` contradicts its own operation list there while `:derived` does not.
-No bb4t change was needed after all.
+### Evidence status
 
-**Still open, and owned by A2:**
+- deterministic suite: 120 tests, 882 assertions, 0 failures;
+- authority boundary tests for `project/list` cover root listing, non-recursion,
+  absolute paths, `..` traversal, symlink refusal in both directions,
+  non-directories, absent paths, malformed arguments, and the grant itself;
+- **not yet done:** native build and PTY evidence for the new capability; a live
+  dogfood re-run of the A1.1 prompt against the widened surface. The A1.1
+  comparison harness now interleaves and rotates variants and includes
+  `:derived`, so the re-run is ready when an endpoint is.
 
-- `:derived` is not live-measured. `:grounded` remains the default because it
-  is the variant A1.1 measured at 3/3, and this repository does not flip a
-  default on deterministic evidence alone. A2 should re-run the comparison —
-  the harness now interleaves and rotates variant order, closing the confound
-  the review found — and flip the default if `:derived` holds up;
-- `resources/bbagent/system.txt` still contains one enumerated-absence
-  sentence. It is deliberately unchanged: it is the frozen A0/A1/A1.1 baseline
-  whose digest anchors the recorded prompt coordinates, and its claim is still
-  true. A2 changes it in the same measured step that flips the default;
-- A2's measurement target changes once `project/list` exists. "Concluded the
-  limitation" is the right answer only while enumeration is missing; afterwards
-  the right answer is a correct enumeration, and `concludes-limitation?` in the
-  harness measures the wrong thing.
+### Still open in A2
 
-See `docs/A1_1_FINDINGS.md` section 9 and section 10.
+`project/search`, `project/edit` with version-anchored mutation, and
+`project/test` are not implemented. Neither is any shell, process, or Git
+capability. The measurement target also needs revisiting: the harness's
+`concludes-limitation?` scored the right answer while enumeration was missing,
+and now scores the wrong thing.
 
-A1 is complete and frozen at `bbagent-a1`. Its findings are in
-`docs/A1_FINDINGS.md`.
+`resources/bbagent/system.txt` still carries one enumerated-absence sentence.
+It remains true -- no editing, shell, process, or network authority exists --
+and it is the digest anchor for the recorded A1.1 prompt coordinates, so it
+changes when a capability actually falsifies it.
 
-## Frozen coordinates
+---
 
-| Milestone | Repository | Tag |
-|---|---|---|
-| A1 | bbagent | `bbagent-a1` |
-| A1.1 | bbagent | `bbagent-a1.1` |
-| A1 / A1.1 | bb4t | `bb4t-s0a`, unchanged |
-
-A1.1 required no bb4t change, as its scope predicted. bb4t's last A1.1-relevant
-coordinate is the S0a application build profile plus the A1 `charm.clj`
-dependency; no new bb4t tag exists because no bb4t source changed.
+## A1.1 (closed, frozen at `bbagent-a1.1`)
 
 ## A1.1: capability orientation
 

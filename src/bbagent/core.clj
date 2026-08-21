@@ -101,13 +101,15 @@
                                                options (:provider/config start))
                               :system-prompt (system-prompt options)
                               :store-backend backend
-                              :orientation (:orientation options)}))
+                              :orientation (:orientation options)
+                              :profile (some-> (:profile options) keyword)}))
           (session/start! {:state-root (state-root options)
                            :project-root (or (:project options) ".")
                            :model-provider (model-provider options nil)
                            :system-prompt (system-prompt options)
                            :store-backend backend
-                           :orientation (:orientation options)}))]
+                           :orientation (:orientation options)
+                              :profile (some-> (:profile options) keyword)}))]
     (try
       (tui/start!
        {:agent-session agent-session
@@ -130,7 +132,8 @@
                          :model-provider (model-provider options nil)
                          :system-prompt (system-prompt options)
                          :store-backend (:store options)
-                         :orientation (:orientation options)})]
+                         :orientation (:orientation options)
+                              :profile (some-> (:profile options) keyword)})]
     (try (interactive! agent-session)
          (finally (session/close! agent-session :operator-exit)))))
 
@@ -146,7 +149,8 @@
                           :model-provider (model-provider options fallback)
                           :system-prompt (system-prompt options)
                           :store-backend (:store options)
-                          :orientation (:orientation options)})]
+                          :orientation (:orientation options)
+                              :profile (some-> (:profile options) keyword)})]
     (try (interactive! agent-session)
          (finally (session/close! agent-session :operator-exit)))))
 
@@ -224,11 +228,13 @@
         "bbagent inspect SESSION_ID [--state PATH] [--store file|sqlite]\n"
         "bbagent s0a-sqlite-smoke --database PATH --project PATH\n"
         "bbagent s0b-native-smoke --phase PHASE --state PATH --session ID [--project PATH]\n"
+       "--profile agent/project-read|agent/project-survey selects the\n"
+       "  capability surface and defaults to agent/project-survey, which\n"
+       "  adds project/list; a resumed session keeps the profile it was\n"
+       "  created with\n"
        "--orientation none|minimal|generated|grounded|derived selects the\n"
        "  model capability preamble; it adds no authority and defaults to\n"
-       "  grounded. derived states closure instead of naming absent\n"
-       "  capabilities, so it stays true as the surface grows; it is not\n"
-       "  yet live-measured.\n"
+       "  derived, which generates its claims from the granted surface\n"
        "  A resumed session keeps the orientation it started with unless\n"
        "  --orientation is given for that run\n"
        "provider options: --endpoint URL --model ID [--reasoning-effort VALUE]\n"

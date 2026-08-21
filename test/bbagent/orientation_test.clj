@@ -50,7 +50,7 @@
       (is (str/includes? preamble
                          "Read a UTF-8 file relative to the authorized project root")))
     (testing "the profile comes from the effective context"
-      (is (str/includes? preamble ":agent/project-read")))
+      (is (str/includes? preamble ":agent/project-survey")))
     (testing "it names the discovery surface that already exists"
       (is (str/includes? preamble "(apropos \"\")"))
       (is (str/includes? preamble "(doc ")))
@@ -170,8 +170,9 @@
                 (finally (session/close! s :test-end)))))]
       (is (= 1 (count (set surfaces)))
           "every variant must produce an identical authority surface")
-      (is (= #{:project/read :data/json-write :data/json-read}
-             (:grants (first surfaces))))
+      (is (= (bb4t/capabilities bb4t/default-profile)
+             (:grants (first surfaces)))
+          "orientation projects the granted surface, whatever it is")
       (is (zero? (:classes (first surfaces))))
       (is (zero? (:imports (first surfaces)))))))
 
@@ -305,10 +306,11 @@
           (is (= "base prompt" (:system-prompt resumed)))
           (finally (session/close! resumed :test-end)))))))
 
-(deftest new-sessions-default-to-grounded-test
-  (testing "a new session is grounded without asking"
-    ;; A1.1 measured :grounded as the only variant that both discovers the
-    ;; granted surface and declines to assert what it cannot establish.
+(deftest new-sessions-default-to-derived-test
+  (testing "a new session is oriented against its actual surface"
+    ;; :grounded is what A1.1 measured, but it states limits as prose and
+    ;; A2's surface can enumerate, so :grounded would now deny a capability
+    ;; the same prompt offers. :derived generates its claims instead.
     (let [state-root (temp-root "bbagent-orientation-default")
           s (session/start! {:state-root state-root
                              :project-root (project)
@@ -316,11 +318,14 @@
                              :system-prompt "base prompt"
                              :store-backend :sqlite})]
       (try
-        (is (= :grounded (get-in s [:coordinate :prompt :orientation])))
-        (is (str/includes? (:system-prompt s) orientation/grounding-constraint))
-        (testing "the default still adds no authority"
+        (is (= :derived (get-in s [:coordinate :prompt :orientation])))
+        (is (str/includes? (:system-prompt s) orientation/derived-constraint))
+        (testing "it offers the enumerating operation and denies nothing"
+          (is (str/includes? (:system-prompt s) "(project/list relative-path)"))
+          (is (not (str/includes? (:system-prompt s) "cannot enumerate"))))
+        (testing "the default still adds no authority beyond its profile"
           (let [d (get-in s [:bb4t :context/description])]
-            (is (= #{:project/read :data/json-write :data/json-read}
+            (is (= (bb4t/capabilities bb4t/default-profile)
                    (get-in d [:context/effective :context/grants])))
             (is (zero? (get-in d [:context/surface :projected-class-count])))
             (is (zero? (get-in d [:context/surface :supplied-import-count])))))
@@ -395,3 +400,69 @@
       (testing "a truncated surface is closed over the true count, not the shown one"
         (is (str/includes? out "returns all 40"))
         (is (not (str/includes? out "That list is complete")))))))
+
+(deftest cli-shaped-nil-options-do-not-unorient-a-session-test
+  (testing "an absent flag means unselected, not :none"
+    ;; The CLI passes every option key with a nil value when its flag is
+    ;; absent, so destructuring defaults never fire on that path. Before this
+    ;; was handled, every CLI session ran unoriented while direct API callers
+    ;; got the default, and resume discarded the inherited orientation.
+    (let [state-root (temp-root "bbagent-orientation-cli")
+          session-id "orientation-cli"
+          started (session/start! {:state-root state-root
+                                   :project-root (project)
+                                   :model-provider (provider/fake [])
+                                   :system-prompt "base prompt"
+                                   :session-id session-id
+                                   :store-backend :sqlite
+                                   :orientation nil
+                                   :profile nil})]
+      (is (= :derived (get-in started [:coordinate :prompt :orientation])))
+      (is (= bb4t/default-profile
+             (get-in started [:coordinate :context :profile])))
+      (session/close! started :test-end)
+      (let [resumed (session/resume! {:state-root state-root
+                                      :session-id session-id
+                                      :model-provider (provider/fake [])
+                                      :system-prompt "base prompt"
+                                      :store-backend :sqlite
+                                      :orientation nil
+                                      :profile nil})]
+        (try
+          (is (= :derived (get-in resumed [:coordinate :prompt :orientation]))
+              "a nil flag must not defeat inheritance")
+          (is (= bb4t/default-profile
+                 (get-in resumed [:coordinate :context :profile])))
+          (finally (session/close! resumed :test-end)))))))
+
+(deftest resume-keeps-the-frozen-profile-test
+  (testing "an A0-era session is never resumed into a wider surface"
+    ;; A replayed form that failed because a capability was absent would
+    ;; succeed under a wider profile, and recovery would fail its own
+    ;; status-equivalence check.
+    (let [state-root (temp-root "bbagent-profile-resume")
+          project-root (project)
+          session-id "profile-resume"
+          started (session/start! {:state-root state-root
+                                   :project-root project-root
+                                   :model-provider (provider/fake [])
+                                   :system-prompt "base prompt"
+                                   :session-id session-id
+                                   :store-backend :sqlite
+                                   :profile :agent/project-read})]
+      (is (= :agent/project-read
+             (get-in started [:coordinate :context :profile])))
+      (session/close! started :test-end)
+      (let [resumed (session/resume! {:state-root state-root
+                                      :session-id session-id
+                                      :model-provider (provider/fake [])
+                                      :system-prompt "base prompt"
+                                      :store-backend :sqlite})]
+        (try
+          (is (= :agent/project-read
+                 (get-in resumed [:coordinate :context :profile])))
+          (is (= #{:data/json-read :data/json-write :project/read}
+                 (get-in resumed [:bb4t :context/description
+                                  :context/effective :context/grants]))
+              "the resumed session keeps the surface its history was made on")
+          (finally (session/close! resumed :test-end)))))))

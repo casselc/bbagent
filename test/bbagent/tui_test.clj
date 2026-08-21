@@ -98,13 +98,13 @@
         (is (not (contains? (set (:effective-grants projected)) :cap/b)))))))
 
 (deftest real-context-capability-projection-test
-  (testing "the projection works on the actual bounded A0 context"
+  (testing "the projection works on the actual bounded context"
     (let [runtime (bb4t/create (project))
           projected (vm/capabilities (:context/description runtime))]
-      (is (= :agent/project-read (:profile projected)))
-      (is (= [:data/json-read :data/json-write :project/read]
+      (is (= :agent/project-survey (:profile projected)))
+      (is (= [:data/json-read :data/json-write :project/list :project/read]
              (:effective-grants projected)))
-      (is (= ["data.json/read" "data.json/write" "project/read"]
+      (is (= ["data.json/read" "data.json/write" "project/list" "project/read"]
              (:vars projected)))
       (is (zero? (:projected-class-count projected)))
       (is (zero? (:supplied-import-count projected))))))

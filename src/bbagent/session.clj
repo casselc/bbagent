@@ -73,22 +73,32 @@
    Creating a session never reads, imports, or converts state held by the
    other backend.
 
-   orientation defaults to :grounded, which A1.1 measured as the only variant
-   that both discovers the granted surface and declines to assert what that
-   surface cannot establish.  It adds no authority; pass :none for the
-   unoriented A0/A1 prompt."
+   profile selects the capability surface and defaults to the A2 surface,
+   :agent/project-survey.  orientation defaults to :derived, whose claims are
+   generated from whatever that surface projects; :grounded, which A1.1
+   measured, states limits as prose and is false against any surface that can
+   enumerate.  Orientation adds no authority in either case."
   [{:keys [state-root project-root model-provider system-prompt session-id
-           store-backend orientation]
+           store-backend orientation profile]
     :or {session-id (coordinates/new-session-id) store-backend :sqlite
-         orientation :grounded}}]
+         orientation :derived}}]
   (let [run-id (coordinates/new-run-id)
         project (coordinates/project-description project-root)
         event-store (storage/open! state-root store-backend)
         unsubscribe (atom nil)]
     (try
-      (let [runtime (bb4t/create (:project/root project))
+      ;; `:or` does not cover an explicit nil, and the CLI passes nil when the
+      ;; flag is absent, so the default is applied here rather than in the
+      ;; destructuring form.
+      (let [runtime (bb4t/create (:project/root project)
+                                 (or profile bb4t/default-profile))
             ;; Composed after the Context exists, because a generated preamble
             ;; is a projection of that Context's own description.
+            ;; nil means "not selected", not ":none": the CLI passes the key
+            ;; with a nil value whenever the flag is absent, so relying on
+            ;; destructuring defaults would silently unorient every CLI
+            ;; session.
+            orientation (or orientation :derived)
             composed-prompt (orientation/compose
                              system-prompt orientation
                              (:context/description runtime))
@@ -253,7 +263,15 @@
             current-project (coordinates/project-description
                              (:project/root project))
             run-id (coordinates/new-run-id)
-            runtime (bb4t/create (:project/root project))
+            ;; A session keeps the capability surface it was created with.
+            ;; Resuming an A0-era session into a wider profile would let a
+            ;; replayed form that once failed now succeed, and recovery
+            ;; would fail its own status-equivalence check.
+            resumed-profile (or (:profile options)
+                                (get-in started [:session/coordinate
+                                                 :context :profile])
+                                :agent/project-read)
+            runtime (bb4t/create (:project/root project) resumed-profile)
             {:keys [messages replay-forms]}
             (recovery-state checkpoint tail
                             #(store/request-event event-store session-id %))]
@@ -271,8 +289,8 @@
               ;; session whose history was produced under orientation.
               resumed-orientation
               (orientation/mode
-               (if (contains? options :orientation)
-                 (:orientation options)
+               (if-some [selected (:orientation options)]
+                 selected
                  (get-in started [:session/coordinate :prompt :orientation])))
               composed-prompt (orientation/compose
                                system-prompt resumed-orientation
