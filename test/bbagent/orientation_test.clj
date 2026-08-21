@@ -31,6 +31,10 @@
   (is (= :minimal (orientation/mode "minimal")))
   (is (= :generated (orientation/mode :generated)))
   (is (= :grounded (orientation/mode :grounded)))
+  (testing "a coordinate written before orientation existed resolves to :none"
+    (is (= :none (orientation/mode
+                  (get-in {:session/coordinate {:prompt {}}}
+                          [:session/coordinate :prompt :orientation])))))
   (testing "an unknown mode is rejected rather than silently ignored"
     (is (thrown? clojure.lang.ExceptionInfo (orientation/mode :verbose)))
     (is (thrown? clojure.lang.ExceptionInfo (orientation/mode 7)))))
@@ -273,8 +277,12 @@
           (is (= "base prompt" (:system-prompt resumed)))
           (finally (session/close! resumed :test-end)))))))
 
-(deftest resume-without-recorded-orientation-is-none-test
-  (testing "a session started before orientation existed resumes unoriented"
+(deftest resume-does-not-orient-an-unoriented-session-test
+  (testing "the default does not reach back into a session that recorded :none"
+    ;; A session recorded :none either because it predates orientation, whose
+    ;; coordinate resolves to :none through mode, or because its operator
+    ;; chose :none.  Either way its history was produced unoriented and
+    ;; changing the default for new sessions must not change it mid-session.
     (let [state-root (temp-root "bbagent-orientation-legacy")
           project-root (project)
           session-id "orientation-legacy"
@@ -283,7 +291,8 @@
                                    :model-provider (provider/fake [])
                                    :system-prompt "base prompt"
                                    :session-id session-id
-                                   :store-backend :sqlite})]
+                                   :store-backend :sqlite
+                                   :orientation :none})]
       (session/close! started :test-end)
       (let [resumed (session/resume! {:state-root state-root
                                       :session-id session-id
@@ -294,3 +303,24 @@
           (is (= :none (get-in resumed [:coordinate :prompt :orientation])))
           (is (= "base prompt" (:system-prompt resumed)))
           (finally (session/close! resumed :test-end)))))))
+
+(deftest new-sessions-default-to-grounded-test
+  (testing "a new session is grounded without asking"
+    ;; A1.1 measured :grounded as the only variant that both discovers the
+    ;; granted surface and declines to assert what it cannot establish.
+    (let [state-root (temp-root "bbagent-orientation-default")
+          s (session/start! {:state-root state-root
+                             :project-root (project)
+                             :model-provider (provider/fake [])
+                             :system-prompt "base prompt"
+                             :store-backend :sqlite})]
+      (try
+        (is (= :grounded (get-in s [:coordinate :prompt :orientation])))
+        (is (str/includes? (:system-prompt s) orientation/grounding-constraint))
+        (testing "the default still adds no authority"
+          (let [d (get-in s [:bb4t :context/description])]
+            (is (= #{:project/read :data/json-write :data/json-read}
+                   (get-in d [:context/effective :context/grants])))
+            (is (zero? (get-in d [:context/surface :projected-class-count])))
+            (is (zero? (get-in d [:context/surface :supplied-import-count])))))
+        (finally (session/close! s :test-end))))))

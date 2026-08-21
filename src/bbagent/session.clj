@@ -71,11 +71,16 @@
   "Starts a new session.  store-backend defaults to :sqlite for newly
    created sessions; pass :file for the human-readable reference backend.
    Creating a session never reads, imports, or converts state held by the
-   other backend."
+   other backend.
+
+   orientation defaults to :grounded, which A1.1 measured as the only variant
+   that both discovers the granted surface and declines to assert what that
+   surface cannot establish.  It adds no authority; pass :none for the
+   unoriented A0/A1 prompt."
   [{:keys [state-root project-root model-provider system-prompt session-id
            store-backend orientation]
     :or {session-id (coordinates/new-session-id) store-backend :sqlite
-         orientation :none}}]
+         orientation :grounded}}]
   (let [run-id (coordinates/new-run-id)
         project (coordinates/project-description project-root)
         event-store (storage/open! state-root store-backend)

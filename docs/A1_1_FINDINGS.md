@@ -251,6 +251,9 @@ from the durable journal.
 
 **Make `:grounded` the default**, then proceed to A2 with `project/list`.
 
+*Done. `session/start!` defaults to `:grounded` as of the review closure; see
+section 10.*
+
 Two things follow from the results, and the second is the one worth carrying
 forward.
 

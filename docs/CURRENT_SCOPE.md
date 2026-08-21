@@ -1,12 +1,19 @@
 # Current Scope: A1.1
 
 **Milestone status:** A0 PASS, S0a PASS, S0b PASS, A1 PASS (accepted with
-follow-ups), A1.1 PASS pending review.
+follow-ups), A1.1 PASS, reviewed and closed.
 
-A1.1 findings are in `docs/A1_1_FINDINGS.md`. Orientation is implemented and
-measured; the default is still `:none`, and changing it is a separate reviewed
-step. The recommendation is to default to `:grounded` and then begin A2 with
-`project/list`. Do not do either without review.
+A1.1 findings are in `docs/A1_1_FINDINGS.md`, with the review recorded in its
+section 10. The review upheld the verdict, fixed three defects, and corrected
+three claims. New sessions now default to `:grounded`; a resumed session keeps
+the orientation it was started with unless that run overrides it.
+
+A2 is not open. Before it begins, one entry condition carried out of the A1.1
+review must be satisfied: **absent authority is asserted as a hardcoded constant
+in three places** — the base system prompt, the generated preamble, and the
+grounding constraint — and all three become false the moment `project/list`
+exists. They must derive from the effects the context actually grants. See
+`docs/A1_1_FINDINGS.md` section 9.
 
 A1 is complete and frozen at `bbagent-a1`. Its findings are in
 `docs/A1_FINDINGS.md`.
