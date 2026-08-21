@@ -5,7 +5,8 @@
   bbagent.tui.state and the projections produced by bbagent.tui.viewmodel.
   Keeping rendering pure is what lets the layout be tested without a
   terminal."
-  (:require [charm.style.core :as style]
+  (:require [bbagent.tui.viewmodel :as vm]
+            [charm.style.core :as style]
             [clojure.pprint :as pprint]
             [clojure.string :as str]))
 
@@ -250,7 +251,7 @@
             events-pane (event-lines state left-width bottom-height)
             convo-pane (conversation-lines state right-width top-height)
             repl-pane (map #(fit (str "repl> " (:source %) " => "
-                                      (pr-str (get-in % [:result :status])))
+                                      (vm/repl-result-summary (:result %)))
                                  right-width)
                            (take-last bottom-height (:repl/log state)))
             left (concat [(pane-title "Context" (= :context (:focus state)))]

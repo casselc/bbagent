@@ -220,3 +220,44 @@
    :error/message (or message "(no message)")
    :error/detail data
    :error/inspectable? (some? data)})
+
+(def ^:private max-repl-summary-characters 240)
+
+(defn repl-result-summary
+  "One line describing what an operator evaluation returned.
+
+  The REPL pane previously rendered only the status, so every successful
+  evaluation read `=> :ok` whatever it produced. That was survivable while the
+  bounded surface returned trivia; once a capability returns a listing or a set
+  of search matches, the value is the entire point of having run it.
+
+  Pure and total: an error reports its category, a described value reports its
+  data, a value too large to describe reports its preview and size, and
+  anything the runtime declined to describe reports its type rather than
+  pretending to a value."
+  [result]
+  (let [value (get-in result [:evaluation :value])
+        out (some-> (get-in result [:evaluation :out]) str/trim not-empty)
+        body
+        (cond
+          (= :error (:status result))
+          (str ":error " (name (or (get-in result [:error :bbagent/error])
+                                   :unknown)))
+
+          (contains? value :value/data)
+          (pr-str (:value/data value))
+
+          (:value/preview value)
+          (str (:value/preview value)
+               " ... (" (or (:value/characters value)
+                            (:value/encoded-characters value))
+               " chars)")
+
+          (= :opaque (:value/kind value))
+          (str "#opaque " (or (:value/type value) "unknown"))
+
+          :else (pr-str (:status result)))
+        body (if (> (count body) max-repl-summary-characters)
+               (str (subs body 0 max-repl-summary-characters) "...")
+               body)]
+    (if out (str out " | " body) body)))

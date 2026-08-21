@@ -99,7 +99,13 @@ def run(dist, state_root, project_root):
     gates["capability_pane"] = (
         "project/read" in first and "data.json/read" in first
     )
-    gates["profile_from_bb4t"] = "agent/project-read" in first
+    # A2: the capability pane is a projection of the real context description,
+    # so the operations added to the profile have to appear without the pane
+    # being told about them.
+    gates["capability_pane_a2"] = (
+        "project/list" in first and "project/search" in first
+    )
+    gates["profile_from_bb4t"] = "agent/project-survey" in first
     gates["events_pane"] = "session/started" in first or "Recent Events" in first
 
     mark = len(s.out)
@@ -116,11 +122,47 @@ def run(dist, state_root, project_root):
     s.send(b"(+ 1 2)\r", settle=4.0)  # bounded evaluation
     gates["bounded_eval"] = ":ok" in plain(bytes(s.out[mark:]))
 
+    # A2 capabilities, driven through the real terminal against the real
+    # image.  The JVM suite proves the semantics; this proves they survive
+    # native compilation and reach an operator at a terminal.
+    mark = len(s.out)
+    s.send(b'(count (project/list "."))\r', settle=5.0)
+    listed = plain(bytes(s.out[mark:]))
+    gates["native_project_list"] = ":ok" in listed and ":error" not in listed
+
+    mark = len(s.out)
+    s.send(b'(count (project/search "fixture"))\r', settle=6.0)
+    searched = plain(bytes(s.out[mark:]))
+    gates["native_project_search"] = ":ok" in searched and ":error" not in searched
+
+    # The expanded vocabulary: a definition the agent could have written,
+    # applied to a capability result, with the string namespace under its
+    # ordinary alias.
+    mark = len(s.out)
+    s.send(b"(defn names [es] (mapv :name es))\r", settle=5.0)
+    defined = plain(bytes(s.out[mark:]))
+    gates["native_defn"] = ":ok" in defined and ":error" not in defined
+
+    mark = len(s.out)
+    s.send(b'(str/includes? (str/join "," (names (project/list "."))) "README")\r',
+           settle=6.0)
+    composed = plain(bytes(s.out[mark:]))
+    gates["native_composition"] = ":ok" in composed and ":error" not in composed
+
+    # A lazy result must describe as data rather than as an opaque host object,
+    # or the vocabulary above produces nothing an operator can see.
+    mark = len(s.out)
+    s.send(b'(take 1 (map :name (project/list ".")))\r', settle=5.0)
+    lazy = plain(bytes(s.out[mark:]))
+    gates["native_lazy_visible"] = (
+        ":ok" in lazy and ":error" not in lazy and "README" in lazy
+    )
+
     # Operator and model share one bounded Context, so an operator definition
     # must be journaled and reconstructed on resume.  Define it here and read
     # it back in the second process below.
     mark = len(s.out)
-    s.send(b"(def native-operator-value 41)\r", settle=4.0)
+    s.send(b"(def native-operator-value 41)\r", settle=6.0)
     gates["operator_def"] = ":ok" in plain(bytes(s.out[mark:]))
 
     s.send(b"\x11", settle=3.0)  # Ctrl-Q: checkpoint and quit
@@ -150,6 +192,9 @@ def run(dist, state_root, project_root):
         gates["resume_starts"] = "bbagent" in resumed
         gates["resume_same_session"] = target[:8] in resumed
         gates["resume_capabilities"] = "project/read" in resumed
+        gates["resume_capabilities_a2"] = (
+            "project/list" in resumed and "project/search" in resumed
+        )
         # Prove the operator definition survived into the rebuilt Context.
         s2.send(b"\x14", settle=1.5)  # Ctrl-T: operator repl mode
         mark2 = len(s2.out)
@@ -157,6 +202,15 @@ def run(dist, state_root, project_root):
         after = plain(bytes(s2.out[mark2:]))
         gates["operator_state_survives_resume"] = (
             ":ok" in after and ":error" not in after
+        )
+
+        # The agent-authored helper is computational state too: it must be
+        # reconstructed by replay exactly as a def is.
+        mark2 = len(s2.out)
+        s2.send(b'(count (names (project/list ".")))\r', settle=6.0)
+        after_defn = plain(bytes(s2.out[mark2:]))
+        gates["operator_defn_survives_resume"] = (
+            ":ok" in after_defn and ":error" not in after_defn
         )
 
         s2.send(b"\x11", settle=3.0)

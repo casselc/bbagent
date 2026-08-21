@@ -683,3 +683,47 @@
         (finally
           (command/shutdown! worker)
           (session/close! agent-session :test-end))))))
+
+(deftest repl-result-summary-shows-the-value-test
+  (testing "an operator sees what an evaluation returned, not that it returned"
+    ;; The pane rendered only the status, so every success read "=> :ok".
+    ;; Survivable while the surface returned trivia; useless once a capability
+    ;; returns a listing.
+    (is (= "[{:name \"README.md\"}]"
+           (vm/repl-result-summary
+            {:status :ok
+             :evaluation {:value {:value/kind :inert-data
+                                  :value/data [{:name "README.md"}]}}})))
+    (testing "an error reports its category"
+      (is (= ":error bb4t-evaluation-failure"
+             (vm/repl-result-summary
+              {:status :error :error {:bbagent/error :bb4t-evaluation-failure}}))))
+    (testing "a value too large to describe reports its preview and size"
+      (let [line (vm/repl-result-summary
+                  {:status :ok
+                   :evaluation {:value {:value/kind :inert-data
+                                        :value/type "java.lang.String"
+                                        :value/truncated? true
+                                        :value/characters 9401
+                                        :value/preview "(ns bbagent.orientation"}}})]
+        (is (str/includes? line "(ns bbagent.orientation"))
+        (is (str/includes? line "9401 chars"))))
+    (testing "an opaque value says so rather than pretending to a value"
+      (is (= "#opaque sci.lang.Var"
+             (vm/repl-result-summary
+              {:status :ok
+               :evaluation {:value {:value/kind :opaque
+                                    :value/type "sci.lang.Var"}}}))))
+    (testing "printed output is kept alongside the value"
+      (is (= "hello | nil"
+             (vm/repl-result-summary
+              {:status :ok
+               :evaluation {:out "hello\n"
+                            :value {:value/kind :inert-data :value/data nil}}}))))
+    (testing "a long value is bounded"
+      (let [line (vm/repl-result-summary
+                  {:status :ok
+                   :evaluation {:value {:value/kind :inert-data
+                                        :value/data (vec (range 500))}}})]
+        (is (<= (count line) 250))
+        (is (str/ends-with? line "..."))))))
