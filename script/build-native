@@ -243,6 +243,22 @@ then
   exit 1
 fi
 
+# A2: the project world and the vocabulary that composes over it must work in
+# the native image, not only on the JVM.  These are positives; the negatives
+# above still have to hold alongside them.
+for a2 in ':project-list :ok' \
+          ':project-search :ok' \
+          ':composition :ok' \
+          ':project/list' \
+          ':project/search'
+do
+  if ! grep -Fq "$a2" "$BUILD_ROOT/s0b-authority.edn"
+  then
+    echo "A2 native evidence missing: $a2" >&2
+    exit 1
+  fi
+done
+
 shopt -s nullglob dotglob
 runtime_tmp_entries=("$RUNTIME_TMP"/*)
 shopt -u nullglob dotglob

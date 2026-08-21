@@ -275,7 +275,16 @@
                                           "(data.json/read \"{\\\"ok\\\":true}\")")
          :json-write (app-runtime/evaluate app "(data.json/write {\"ok\" true})")
          :project-read (app-runtime/evaluate app "(project/read \"README.md\")")
-         :project-list (app-runtime/evaluate app "(project/list \".\")")}
+         :project-list (app-runtime/evaluate app "(project/list \".\")")
+         ;; A2 capabilities and the vocabulary that composes over them, so the
+         ;; native image proves the whole path rather than the two operations
+         ;; A0 shipped with.
+         :project-search (app-runtime/evaluate app
+                                               "(project/search \"fixture\")")
+         :composition (app-runtime/evaluate
+                       app
+                       (str "(do (defn names [es] (mapv :name es)) "
+                            "(count (str/join \",\" (names (project/list \".\")))))"))}
         negatives (into (sorted-map)
                          (map (fn [[probe source]]
                                 [probe (app-runtime/evaluate app source)]))
