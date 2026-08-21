@@ -25,7 +25,7 @@ the combination is unusable. Detail and options in section 10.
 | bbagent deterministic suite | 141 tests, 1013 assertions, 0 failures |
 | bb4t deterministic suite | 18 tests, 167 assertions, 0 failures, incl. 96-case authority corpus |
 | Native image | built; A2 grants present, 35 authority negatives denied, `:projected-class-count 0` |
-| PTY proof | 30 gates pass |
+| PTY proof | 30 gates pass, at the commit under review |
 | Live model, fixture comparison | complete answers 0/3 before `project/list`, 3/3 after |
 | Live model, this repository | orientation question 13→6 actions; budget question 4 actions; edit task 8→5 actions |
 
@@ -537,7 +537,8 @@ silently or be forgotten while it is open.
 ## 11. Native and PTY evidence for the write surface
 
 Thirty gates pass against an image built at bb4t `f3547d02` and bbagent
-`c7afbb6e`. In the image, `:project-edit-anchored :ok` and
+`1149e0d5` — the commit under review, rebuilt so the image matches the source a
+reviewer reads rather than trailing it by one change. In the image, `:project-edit-anchored :ok` and
 `:project-edit-conflict-refused :ok` sit alongside all 35 authority negatives
 with `:projected-class-count 0`.
 

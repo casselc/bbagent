@@ -1,18 +1,18 @@
 {:milestone :a2
  :evidence :native-and-pty
  :result :pass
+ :note "Evidence for the surface as it stands. A2 itself is blocked; see docs/A2_FINDINGS.md section 10."
 
  :coordinate
- {:bb4t/commit "05fd11a9abb61b991ee136f2dfad1debfb8a0091"
-  :bbagent/commit "982bafc7c87fce788311b5e4b724b682a86e87e5"
+ {:bb4t/commit "f3547d0270fb7b805130bbe61f60ef4c1f6365ad"
+  :bbagent/commit "1149e0d573b5bd06357958af555fca3e5c4f4de1"
   :builder "script/build-native"
-  :source "built twice: once from the local working repositories, once from the published remotes after pushing"}
+  :note "built at the commit under review, so the image matches the source a reviewer reads"}
 
  :image
  {:path "dist/bbagent"
   :bytes 74909952
-  :sha256 "bf79e0359135112e4fb4b12e926124f421a0c2d1b0b8538043231c165710fe02"
-  :sidecar "libsqlitejdbc.so, pinned digest unchanged"
+  :sha256 "63c52473b8794b8899bbfe373d03da95d06fcc2de9951d3dfd33c1432b9aa842"
   :platform {:os "Ubuntu" :arch "x86_64" :libc "glibc"}
   :toolchain {:graalvm "Oracle GraalVM 25.0.4+7.1" :java "25.0.4"}
   :native-image-additions :none
@@ -25,41 +25,43 @@
   :same-digest? false
   :bytes-differing 56469352
   :gates :identical
-  :positive-probes-identical? true
-  :finding
-  (str "Two builds of identical source produce binaries of identical size and "
-       "identical behaviour with different digests, differing across most of "
-       "the image rather than in a timestamp field. native-image output is not "
-       "bit-reproducible in this toolchain, so an image digest identifies one "
-       "artifact and is not evidence about a source coordinate. The source "
-       "coordinates and the gate results are the reproducible part.")}
+  :finding "native-image output is not bit-reproducible in this toolchain, so an image digest identifies one artifact and is not evidence about a source coordinate. The source coordinates and the gate results are the reproducible part."}
 
  :authority
- {:context/grants #{:project/read :project/list :project/search
-                    :data/json-write :data/json-read}
+ {:context/grants #{:project/read :project/list :project/search :project/stat
+                    :project/edit :data/json-write :data/json-read}
   :projected-class-count 0
   :supplied-import-count 0
   :negative-probe/count 35
   :positive-probes {:core :ok :json-read :ok :json-write :ok
                     :project-read :ok :project-list :ok :project-search :ok
-                    :composition :ok}
-  :claim "the image gained the project world; the model gained no class and no import"}
+                    :project-stat :ok :project-edit-anchored :ok
+                    :project-edit-conflict-refused :ok :composition :ok}
+  :claim "the image gained the project world, including a write; the model gained no class and no import"}
 
  :pty
  {:harness "script/tui-native-proof.py"
-  :gates 25
-  :passed 25
-  :a2-gates [:capability_pane_a2 :native_project_list :native_project_search
-             :native_defn :native_composition :native_lazy_visible
-             :resume_capabilities_a2 :operator_defn_survives_resume]
-  :defect-found-by-gate
-  {:what "the operator REPL rendered only the result status, never the value"
-   :how "the gate asserted a listing's contents appear on screen; they did not"
-   :fixed-in "982bafc7c87fce788311b5e4b724b682a86e87e5"}}
+  :gates 30
+  :passed 30
+  :interface-gates "asserted against the terminal: the TUI starts, panes project the real context description, keys work, sessions list, resume reopens, processes exit"
+  :semantic-gates "asserted against the durable journal, not the screen"
+  :why-journal "charm redraws incrementally; once a pane is full a value line is rewritten in place rather than emitted contiguously, so a marker plainly visible to a person never reaches the byte stream. Screen-scraping cannot carry a semantic claim."
+  :defects-found-by-these-gates
+  [{:what "the operator REPL rendered only the result status, never the value"}
+   {:what "a REPL result shared one line with its source, so at 80 columns the value was always the half truncated away"}
+   {:what "a session that edits a file cannot be resumed"
+    :severity :blocking
+    :see "docs/A2_FINDINGS.md section 10"}]}
+
+ :suites
+ {:bbagent {:tests 141 :assertions 1013 :failures 0 :errors 0}
+  :bb4t {:tests 18 :assertions 167 :failures 0 :errors 0
+         :includes "96-case authority corpus"}}
 
  :nonclaims
  ["Linux x86_64 glibc only; no cross-platform or static-linking claim"
-  "the image digest is an artifact identifier, not a reproducibility claim; see :reproducibility"
-  "no JVM/native suite parity claim; the native evidence is the smoke, the authority corpus and the PTY gates, not the 132-test suite"
-  "the PTY gates assert on rendered text, so they prove an operator can see a result, not that the rendering is correct in every terminal"
+  "the image digest is an artifact identifier, not a reproducibility claim"
+  "no JVM/native suite parity; the native evidence is the smoke, the authority corpus and the PTY gates"
+  "the expanded base-allow is argued pure and corpus-checked, not proved"
+  "project/edit is compare-and-swap by observation, not atomically"
   "no live model call in the PTY proof; the endpoint is deliberately unroutable"]}
