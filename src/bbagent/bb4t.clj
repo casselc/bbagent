@@ -26,12 +26,14 @@
    {:context-spec/version 1
     :profile :agent/project-survey
     :requested-capabilities #{:data/json-read :data/json-write
-                              :project/read :project/list}
+                              :project/read :project/list :project/search}
     :authorized-capabilities #{:data/json-read :data/json-write
-                               :project/read :project/list}
+                               :project/read :project/list :project/search}
     :resource-bindings {:project :project/root}
     :limits {:project/read-max-bytes 1048576
-             :project/list-max-entries 4096}}})
+             :project/list-max-entries 4096
+             :project/search-max-results 200
+             :project/search-max-files 20000}}})
 
 (def default-profile :agent/project-survey)
 

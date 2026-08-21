@@ -16,6 +16,9 @@ that specific report.
 
 - **`project/list`** (bb4t): one directory deep, sorted inert data, symbolic
   links described but never followed, bounded by `:project/list-max-entries`.
+- **`project/search`** (bb4t): regex over file contents returning
+  `{:path :line :text}`, same traversal rules, skipping non-UTF-8 files, with a
+  measured per-line matching budget.
 - **`:agent/project-survey`**: a new profile carrying the A0 authority plus
   listing. `:agent/project-read` is frozen and still reproduces the recorded
   A0/A1/A1.1 surface exactly, which is pinned by test.
@@ -44,8 +47,8 @@ Three defects that only appeared from using it, all fixed; see
 
 ### Evidence status
 
-- deterministic suites: bbagent 122 tests / 889 assertions, bb4t 18 tests /
-  164 assertions including the 96-case authority corpus, 0 failures;
+- deterministic suites: bbagent 131 tests / 924 assertions, bb4t 18 tests /
+  167 assertions including the 96-case authority corpus, 0 failures;
 - live comparison, 3 repetitions per arm, arms alternated: complete answers
   0/3 before, 3/3 after, with zero REPL errors after;
 - live self-dogfood against this repository: 13 actions / 5 errors before the

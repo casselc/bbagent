@@ -1,7 +1,7 @@
 # A2 Findings (in progress): Useful Semantic Project World
 
-Status: **A2 active.** `project/list` is delivered and dogfooded. `project/search`,
-`project/edit`, and `project/test` are not started.
+Status: **A2 active.** `project/list` and `project/search` are delivered and
+dogfooded. `project/edit` and `project/test` are not started.
 
 ## 1. The question
 
@@ -165,9 +165,107 @@ the argument for treating a stale-prone constant as a defect rather than a note.
   scored the right answer while enumeration was missing. The A2 harness measures
   answer completeness against known ground truth instead.
 
-## 7. Next
+## 7. `project/search`
 
-`project/search` is the next capability: the dogfood showed the model listing
-directory by directory to find one file, which search collapses. After that,
+The second capability, motivated by the dogfood above: the model was listing
+directory by directory to find one file.
+
+Searching file contents for a regex, returning `{:path :line :text}` sorted by
+path. It inherits `project/list`'s traversal rules — never follows a symbolic
+link, skips dot-entries unless asked — and skips files that are not valid UTF-8,
+which is how a binary file is recognized without guessing from its name.
+
+### Matching is bounded, and the bound is measured
+
+The obvious claim to make here is "this prevents catastrophic backtracking."
+Measuring it first showed that claim would have been wrong. Java's matcher is
+**not** exponential on the textbook cases:
+
+| pattern | n | character reads |
+|---|---:|---:|
+| `(a+)+$` | 200 | 41,197 |
+| `(a+)+$` | 400 | 162,397 |
+| `(a+)+$` | 1000 | 1,005,997 |
+
+That is quadratic, not `2^n`. So the per-line budget is not a defence against
+exponential blowup the engine already avoids; it bounds the **superlinear**
+case, where one long line and a nested quantifier still burn real CPU and a file
+full of them multiplies it. Each line matches through a counting `CharSequence`
+and fails past 200,000 reads, so search cost stays a function of project size
+rather than of pattern cleverness. The test pins the measured boundary: 200 a's
+finishes, 1000 does not.
+
+### Measured effect
+
+Asked *"Where is the per-turn action budget defined, what is its value, and why
+was it set to that number?"*, against this repository:
+
+```text
+(project/list ".")
+(project/search "budget")
+(project/read "src/bbagent/agent.clj")
+(project/read "docs/A2_FINDINGS.md")
+
+4 actions, 0 errors
+```
+
+It quoted the docstring correctly. Search reached the file in one action.
+
+### Two defects the previous change had introduced
+
+Both found by using it, neither by a test.
+
+**Lazy sequences described as opaque.** `take`, `map`, and `filter` all return
+one, so expanding the vocabulary let the model compose and then *not see what it
+had composed*. `(take 2 hits)` came back with no data at all.
+
+The fix is not just "describe them". Realization runs the sequence's own
+computation, so it has to happen **during evaluation** — inside the out/err
+capture, before the success event — and not at description time, which runs
+after the evaluation has already been recorded as succeeding and where printed
+output would go nowhere. The BB1 corpus property protecting this was replaced
+rather than deleted: `lazy-result-opaque?` became
+`lazy-result-realized-as-data?` plus `lazy-result-bounded?`, and host objects
+stay opaque.
+
+**`str/` did not resolve.** It is how Clojure is written, and the bounded
+context has no `require` with which to establish an alias. The dogfood watched
+the model reach for `str/replace` and fail twice. SCI checks permission against
+the symbol *as written*, before alias resolution, so an alias alone does not
+make `str/join` callable — both spellings are listed. That keeps the allow-list
+a literal statement of what may be written, which is the property an authority
+list should have: no spelling permitted by indirection. An unlisted string
+function is still denied under either name.
+
+### Composition now works end to end
+
+```clojure
+(def hits (project/search "needle"))
+(defn in-dir [ms d]
+  (filter (fn [m] (str/starts-with? (:path m) d)) ms))
+(count (in-dir hits "src"))
+```
+
+That is the product thesis running: a capability result refined by
+agent-authored vocabulary, with no new host operation.
+
+### Run-to-run variance is real
+
+A second run of the *same* orientation question took 13 actions with 2 errors,
+against 6 before search existed. A broad `(project/search "orient")` returned
+matches in artifacts and docs, and the model followed them into an evidence file
+and a filename that does not exist before finding the source. **Search does not
+monotonically reduce work; it changes what the model has to filter.** Single
+sessions are not a measurement, and this one is reported because it is
+unflattering rather than despite it.
+
+## 8. Next
+
 `project/edit` with version-anchored mutation, where the interesting question is
-conflict semantics rather than the edit itself.
+conflict semantics rather than the edit itself. Then `project/test`.
+
+Two smaller items the dogfood surfaced and did not fix: a broad search returns
+matches from `artifacts/` and `docs/` that crowd out source, which is an
+argument for the model narrowing with `:path` rather than for a host-side
+default; and `project/read` still previews only 2,048 characters of a large
+file, so the model reads a big source file in slices.
