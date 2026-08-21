@@ -122,68 +122,68 @@ def run(dist, state_root, project_root):
     gates["repl_mode"] = "repl>" in plain(bytes(s.out[mark:]))
 
     mark = len(s.out)
-    s.send(b"(+ 1 2)\r", settle=4.0)  # bounded evaluation
-    gates["bounded_eval"] = ":ok" in plain(bytes(s.out[mark:]))
+    s.send(b'(str "EVAL-" (+ 1 2))\r', settle=4.0)  # bounded evaluation
+    gates["bounded_eval"] = "EVAL-3" in plain(bytes(s.out[mark:]))
 
     # A2 capabilities, driven through the real terminal against the real
     # image.  The JVM suite proves the semantics; this proves they survive
     # native compilation and reach an operator at a terminal.
+    # Each probe renders a value unique to itself. The pane redraws several
+    # previous entries on every keystroke, so a gate that looks for ":ok"
+    # could be satisfied by an older line rather than by its own result.
     mark = len(s.out)
-    s.send(b'(count (project/list "."))\r', settle=5.0)
-    listed = plain(bytes(s.out[mark:]))
-    gates["native_project_list"] = ":ok" in listed and ":error" not in listed
+    s.send(b'(str "LIST-" (count (project/list ".")))\r', settle=5.0)
+    gates["native_project_list"] = "LIST-1" in plain(bytes(s.out[mark:]))
 
     mark = len(s.out)
-    s.send(b'(count (project/search "fixture"))\r', settle=6.0)
-    searched = plain(bytes(s.out[mark:]))
-    gates["native_project_search"] = ":ok" in searched and ":error" not in searched
+    s.send(b'(str "SEARCH-" (count (project/search "fixture")))\r', settle=6.0)
+    gates["native_project_search"] = "SEARCH-1" in plain(bytes(s.out[mark:]))
 
     # The expanded vocabulary: a definition the agent could have written,
     # applied to a capability result, with the string namespace under its
     # ordinary alias.
     mark = len(s.out)
     s.send(b"(defn names [es] (mapv :name es))\r", settle=5.0)
-    defined = plain(bytes(s.out[mark:]))
-    gates["native_defn"] = ":ok" in defined and ":error" not in defined
+    gates["native_defn"] = "sci.lang.Var" in plain(bytes(s.out[mark:]))
 
     mark = len(s.out)
-    s.send(b'(str/includes? (str/join "," (names (project/list "."))) "README")\r',
+    s.send(b'(str "COMPOSE-" (str/join "," (names (project/list "."))))\r',
            settle=6.0)
-    composed = plain(bytes(s.out[mark:]))
-    gates["native_composition"] = ":ok" in composed and ":error" not in composed
+    gates["native_composition"] = "COMPOSE-README.md" in plain(bytes(s.out[mark:]))
 
     # A lazy result must describe as data rather than as an opaque host object,
     # or the vocabulary above produces nothing an operator can see.
     mark = len(s.out)
     s.send(b'(take 1 (map :name (project/list ".")))\r', settle=5.0)
-    lazy = plain(bytes(s.out[mark:]))
-    gates["native_lazy_visible"] = (
-        ":ok" in lazy and ":error" not in lazy and "README" in lazy
-    )
+    gates["native_lazy_visible"] = "README.md" in plain(bytes(s.out[mark:]))
 
     # The write path at a real terminal: an anchored edit applies, and the now
     # stale base is refused rather than clobbering what replaced it.
-    mark = len(s.out)
     s.send(b'(def before (project/stat "README.md"))\r', settle=5.0)
-    gates["native_stat"] = ":ok" in plain(bytes(s.out[mark:]))
-
     mark = len(s.out)
-    s.send(b'(project/edit {:path "README.md" :base {:digest (:digest before)} '
-           b':content "rewritten by the native proof\n"})\r', settle=6.0)
-    applied = plain(bytes(s.out[mark:]))
-    gates["native_edit_applies"] = ":ok" in applied and ":error" not in applied
+    s.send(b'(str "STAT-" (:kind before) "-" (subs (:digest before) 0 10))\r',
+           settle=5.0)
+    gates["native_stat"] = "STAT-:file-sha256:" in plain(bytes(s.out[mark:]))
 
+    s.send(b'(def applied (project/edit {:path "README.md" '
+           b':base {:digest (:digest before)} '
+           b':content "rewritten by the native proof\n"}))\r', settle=6.0)
+    mark = len(s.out)
+    s.send(b'(str "EDIT-" (:bytes applied))\r', settle=5.0)
+    gates["native_edit_applies"] = "EDIT-30" in plain(bytes(s.out[mark:]))
+
+    # `before` is now stale: the edit above consumed it.
     mark = len(s.out)
     s.send(b'(project/edit {:path "README.md" :base {:digest (:digest before)} '
            b':content "clobbered"})\r', settle=6.0)
-    refused = plain(bytes(s.out[mark:]))
-    gates["native_edit_conflict_refused"] = "conflict" in refused
+    gates["native_edit_conflict_refused"] = "conflict" in plain(bytes(s.out[mark:]))
 
     mark = len(s.out)
-    s.send(b'(project/read "README.md")\r', settle=5.0)
-    kept = plain(bytes(s.out[mark:]))
+    s.send(b'(str "KEPT-" (str/includes? (project/read "README.md") "native proof")'
+           b' "-" (str/includes? (project/read "README.md") "clobbered"))\r',
+           settle=6.0)
     gates["native_conflict_kept_content"] = (
-        "rewritten by the native proof" in kept and "clobbered" not in kept
+        "KEPT-true-false" in plain(bytes(s.out[mark:]))
     )
 
     # Operator and model share one bounded Context, so an operator definition
@@ -191,7 +191,7 @@ def run(dist, state_root, project_root):
     # it back in the second process below.
     mark = len(s.out)
     s.send(b"(def native-operator-value 41)\r", settle=6.0)
-    gates["operator_def"] = ":ok" in plain(bytes(s.out[mark:]))
+    gates["operator_def"] = "sci.lang.Var" in plain(bytes(s.out[mark:]))
 
     s.send(b"\x11", settle=3.0)  # Ctrl-Q: checkpoint and quit
     code = s.wait()
@@ -227,19 +227,18 @@ def run(dist, state_root, project_root):
         # Prove the operator definition survived into the rebuilt Context.
         s2.send(b"\x14", settle=1.5)  # Ctrl-T: operator repl mode
         mark2 = len(s2.out)
-        s2.send(b"(+ native-operator-value 1)\r", settle=5.0)
-        after = plain(bytes(s2.out[mark2:]))
+        s2.send(b'(str "RESUMED-" (+ native-operator-value 1))\r', settle=5.0)
         gates["operator_state_survives_resume"] = (
-            ":ok" in after and ":error" not in after
+            "RESUMED-42" in plain(bytes(s2.out[mark2:]))
         )
 
         # The agent-authored helper is computational state too: it must be
         # reconstructed by replay exactly as a def is.
         mark2 = len(s2.out)
-        s2.send(b'(count (names (project/list ".")))\r', settle=6.0)
-        after_defn = plain(bytes(s2.out[mark2:]))
+        s2.send(b'(str "HELPER-" (first (names (project/list "."))))\r',
+                settle=6.0)
         gates["operator_defn_survives_resume"] = (
-            ":ok" in after_defn and ":error" not in after_defn
+            "HELPER-README.md" in plain(bytes(s2.out[mark2:]))
         )
 
         s2.send(b"\x11", settle=3.0)

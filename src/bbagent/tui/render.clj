@@ -250,10 +250,19 @@
       (let [context-pane (capability-lines state left-width top-height)
             events-pane (event-lines state left-width bottom-height)
             convo-pane (conversation-lines state right-width top-height)
-            repl-pane (map #(fit (str "repl> " (:source %) " => "
-                                      (vm/repl-result-summary (:result %)))
-                                 right-width)
-                           (take-last bottom-height (:repl/log state)))
+            ;; Two lines per entry, because one cannot hold both. At 80
+            ;; columns this pane is about 40 wide, and a source form plus its
+            ;; value on one line meant the value was always the half that got
+            ;; truncated away -- which is the half the operator ran the form
+            ;; for.
+            repl-pane (mapcat (fn [entry]
+                                [(fit (str "repl> " (:source entry)) right-width)
+                                 (fit (str "  => "
+                                           (vm/repl-result-summary
+                                            (:result entry)))
+                                      right-width)])
+                              (take-last (max 1 (quot bottom-height 2))
+                                         (:repl/log state)))
             left (concat [(pane-title "Context" (= :context (:focus state)))]
                          context-pane
                          (repeat (max 0 (- top-height (count context-pane))) "")
