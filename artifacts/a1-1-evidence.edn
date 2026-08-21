@@ -48,6 +48,32 @@
 
  :jvm-tests {:tests 107 :assertions 803 :failures 0 :errors 0}
 
+ :review
+ {:verdict :stands
+  :runs-recomputed 12
+  :prompt-digests-reproduced 4
+  :findings
+  [{:id 1 :finding "the preamble described a truncated surface as complete"
+    :disposition :fixed
+    :note "latent at the A0 three-operation surface; would fire in A2"}
+   {:id 2 :finding "absent authority is hardcoded in three places, not one"
+    :disposition :a2-entry-condition
+    :locations ["resources/bbagent/system.txt"
+                "orientation/generated-preamble"
+                "orientation/grounding-constraint"]}
+   {:id 3 :finding "resume silently discarded the session's orientation"
+    :disposition :fixed
+    :note "continuity defect, not an attribution defect"}
+   {:id 4 :finding "--orientation usage text omitted grounded"
+    :disposition :fixed}
+   {:id 5 :finding "variants ran in blocks, not interleaved"
+    :disposition :nonclaim-added
+    :note "elapsed-time comparison withdrawn; action counts unaffected"}
+   {:id 6 :finding "the fixture README enumerates the other file"
+    :disposition :nonclaim-corrected
+    :note "A2 fixture must not let one file enumerate the others"}]
+  :jvm-tests {:tests 110 :assertions 818 :failures 0 :errors 0}}
+
  :nonclaims
  ["one model, one endpoint, one prompt, three repetitions per variant"
   "minimal and generated overlap within noise; their ordering is not a result"

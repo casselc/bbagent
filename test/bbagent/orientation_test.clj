@@ -75,7 +75,27 @@
                     {:context/surface {:projections many}})]
       (is (str/includes? preamble "and 28 more"))
       (is (str/includes? preamble "(apropos \"\")")
-          "the complete list stays reachable through the discovery surface"))))
+          "the complete list stays reachable through the discovery surface")
+      (testing "a truncated list is never described as complete"
+        ;; The review found the preamble asserting "exactly these
+        ;; operations", "... and 28 more", and "That list is complete" at
+        ;; once.  A preamble whose purpose is to stop unsupported claims
+        ;; must not make one.
+        (is (not (str/includes? preamble "That list is complete"))
+            "a truncated surface must not be claimed complete")
+        (is (not (str/includes? preamble "exactly these operations"))
+            "a truncated surface is not the exact surface")
+        (is (str/includes? preamble "partial"))
+        (is (str/includes? preamble "these 12 of its 40 operations")))))
+  (testing "a surface that fits is still stated as complete"
+    (let [preamble (orientation/generated-preamble
+                    {:context/surface
+                     {:projections [{:sci/var 'only.ns/op
+                                     :arglists '([x])
+                                     :doc "The only operation."}]}})]
+      (is (str/includes? preamble "exactly these operations"))
+      (is (str/includes? preamble "That list is complete."))
+      (is (not (str/includes? preamble "partial"))))))
 
 (deftest compose-test
   (let [d (description)]
@@ -194,3 +214,83 @@
                    (get-in started [:session/coordinate :prompt :orientation]))
                 "an experiment run must be attributable from its journal alone"))
           (finally (store/close-store! root)))))))
+
+(deftest resume-keeps-the-session-orientation-test
+  (testing "a resumed session keeps the orientation it was started with"
+    ;; Found in review: resuming without repeating the flag silently
+    ;; returned the model to the unoriented prompt, in a session whose
+    ;; conversation history had been produced under orientation.
+    (let [state-root (temp-root "bbagent-orientation-resume")
+          project-root (project)
+          session-id "orientation-resume"
+          started (session/start! {:state-root state-root
+                                   :project-root project-root
+                                   :model-provider (provider/fake [])
+                                   :system-prompt "base prompt"
+                                   :session-id session-id
+                                   :store-backend :sqlite
+                                   :orientation :grounded})]
+      (is (= :grounded (get-in started [:coordinate :prompt :orientation])))
+      (session/close! started :test-end)
+      (let [resumed (session/resume! {:state-root state-root
+                                      :session-id session-id
+                                      :model-provider (provider/fake [])
+                                      :system-prompt "base prompt"
+                                      :store-backend :sqlite})]
+        (try
+          (is (= :grounded
+                 (get-in resumed [:coordinate :prompt :orientation]))
+              "the resumed run records the inherited orientation")
+          (is (str/includes? (:system-prompt resumed)
+                             orientation/grounding-constraint)
+              "the model keeps receiving the grounding constraint")
+          (is (= (:system-prompt started) (:system-prompt resumed))
+              "the same prompt reaches the model across the resume")
+          (finally (session/close! resumed :test-end)))))))
+
+(deftest resume-orientation-override-applies-to-that-run-test
+  (testing "an explicit orientation overrides the inherited one"
+    (let [state-root (temp-root "bbagent-orientation-override")
+          project-root (project)
+          session-id "orientation-override"
+          started (session/start! {:state-root state-root
+                                   :project-root project-root
+                                   :model-provider (provider/fake [])
+                                   :system-prompt "base prompt"
+                                   :session-id session-id
+                                   :store-backend :sqlite
+                                   :orientation :grounded})]
+      (session/close! started :test-end)
+      (let [resumed (session/resume! {:state-root state-root
+                                      :session-id session-id
+                                      :model-provider (provider/fake [])
+                                      :system-prompt "base prompt"
+                                      :store-backend :sqlite
+                                      :orientation :none})]
+        (try
+          (is (= :none (get-in resumed [:coordinate :prompt :orientation]))
+              "an explicit override is honoured and recorded")
+          (is (= "base prompt" (:system-prompt resumed)))
+          (finally (session/close! resumed :test-end)))))))
+
+(deftest resume-without-recorded-orientation-is-none-test
+  (testing "a session started before orientation existed resumes unoriented"
+    (let [state-root (temp-root "bbagent-orientation-legacy")
+          project-root (project)
+          session-id "orientation-legacy"
+          started (session/start! {:state-root state-root
+                                   :project-root project-root
+                                   :model-provider (provider/fake [])
+                                   :system-prompt "base prompt"
+                                   :session-id session-id
+                                   :store-backend :sqlite})]
+      (session/close! started :test-end)
+      (let [resumed (session/resume! {:state-root state-root
+                                      :session-id session-id
+                                      :model-provider (provider/fake [])
+                                      :system-prompt "base prompt"
+                                      :store-backend :sqlite})]
+        (try
+          (is (= :none (get-in resumed [:coordinate :prompt :orientation])))
+          (is (= "base prompt" (:system-prompt resumed)))
+          (finally (session/close! resumed :test-end)))))))

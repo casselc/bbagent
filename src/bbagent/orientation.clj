@@ -105,19 +105,27 @@
                         [:context/effective :context/profile])]
     (when (seq ops)
       (let [listed (take max-listed-operations ops)
-            omitted (- (count ops) (count listed))]
+            omitted (- (count ops) (count listed))
+            complete? (zero? omitted)]
         (str/join
          "\n"
          (concat
-          [(str "Your bounded Clojure REPL projects exactly these operations"
+          [(str "Your bounded Clojure REPL projects "
+                (if complete?
+                  "exactly these operations"
+                  (str "these " (count listed) " of its " (count ops)
+                       " operations"))
                 (when profile (str " under profile " profile))
                 ":")]
           (map operation-line listed)
-          (when (pos? omitted)
-            [(str "  ... and " omitted " more; use (apropos \"\") for the"
-                  " complete list.")])
+          (when-not complete?
+            [(str "  ... and " omitted " more not shown here.")])
           [""
-           (str "That list is complete. You have no file listing, search, "
+           (str (if complete?
+                  "That list is complete."
+                  (str "That list is partial; (apropos \"\") returns all "
+                       (count ops) "."))
+                " You have no file listing, search, "
                 "editing, shell, process, network, or host API operation. "
                 minimal-instruction)]))))))
 

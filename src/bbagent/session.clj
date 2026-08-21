@@ -215,10 +215,15 @@
    root: a session stored by the file backend must be resumed with
    :file.  Resuming with the wrong backend fails as
    :session-recovery-failure; it never reinterprets or migrates the other
-   backend's durable state."
-  [{:keys [state-root session-id model-provider system-prompt store-backend
-           orientation]
-    :or {store-backend :sqlite orientation :none}}]
+   backend's durable state.
+
+   A session keeps the orientation it was started with unless this run
+   passes :orientation explicitly, in which case the override applies to
+   this run only.  A session started before orientation existed records
+   none, and resolves to :none."
+  [{:keys [state-root session-id model-provider system-prompt store-backend]
+    :or {store-backend :sqlite}
+    :as options}]
   (let [event-store (storage/open! state-root store-backend)]
     (try
       (let [_ (store/validate-session! event-store session-id)
@@ -255,13 +260,22 @@
                                    {:source source
                                     :expected-status expected-status
                                     :actual-status (:status result)})))))
-        (let [composed-prompt (orientation/compose
-                               system-prompt orientation
+        (let [;; Inherited from the start coordinate rather than defaulted,
+              ;; because resuming without repeating the flag used to return
+              ;; the model to the unoriented prompt in the middle of a
+              ;; session whose history was produced under orientation.
+              resumed-orientation
+              (orientation/mode
+               (if (contains? options :orientation)
+                 (:orientation options)
+                 (get-in started [:session/coordinate :prompt :orientation])))
+              composed-prompt (orientation/compose
+                               system-prompt resumed-orientation
                                (:context/description runtime))
               coordinate (envelope session-id run-id
                                    current-project
                                    model-provider composed-prompt runtime
-                                   (orientation/mode orientation))
+                                   resumed-orientation)
               _ (store/append-event!
                  event-store session-id
                  {:event/type :session/resumed
