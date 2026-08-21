@@ -6,7 +6,7 @@
  {:bb4t/commit "05fd11a9abb61b991ee136f2dfad1debfb8a0091"
   :bbagent/commit "982bafc7c87fce788311b5e4b724b682a86e87e5"
   :builder "script/build-native"
-  :source "local working repositories, not the published remotes"}
+  :source "built twice: once from the local working repositories, once from the published remotes after pushing"}
 
  :image
  {:path "dist/bbagent"
@@ -17,6 +17,22 @@
   :toolchain {:graalvm "Oracle GraalVM 25.0.4+7.1" :java "25.0.4"}
   :native-image-additions :none
   :note "A2 added no reachability metadata, no build flag, and no dependency"}
+
+ :reproducibility
+ {:rebuilt-from :published-remotes
+  :same-coordinates? true
+  :same-size? true
+  :same-digest? false
+  :bytes-differing 56469352
+  :gates :identical
+  :positive-probes-identical? true
+  :finding
+  (str "Two builds of identical source produce binaries of identical size and "
+       "identical behaviour with different digests, differing across most of "
+       "the image rather than in a timestamp field. native-image output is not "
+       "bit-reproducible in this toolchain, so an image digest identifies one "
+       "artifact and is not evidence about a source coordinate. The source "
+       "coordinates and the gate results are the reproducible part.")}
 
  :authority
  {:context/grants #{:project/read :project/list :project/search
@@ -43,7 +59,7 @@
 
  :nonclaims
  ["Linux x86_64 glibc only; no cross-platform or static-linking claim"
-  "built from local working repositories, so these coordinates are not fetchable from the published remotes until pushed"
+  "the image digest is an artifact identifier, not a reproducibility claim; see :reproducibility"
   "no JVM/native suite parity claim; the native evidence is the smoke, the authority corpus and the PTY gates, not the 132-test suite"
   "the PTY gates assert on rendered text, so they prove an operator can see a result, not that the rendering is correct in every terminal"
   "no live model call in the PTY proof; the endpoint is deliberately unroutable"]}

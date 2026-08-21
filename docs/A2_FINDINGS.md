@@ -1,7 +1,7 @@
 # A2 Findings (in progress): Useful Semantic Project World
 
-Status: **A2 active.** `project/list` and `project/search` are delivered and
-dogfooded. `project/edit` and `project/test` are not started.
+Status: **A2 active.** `project/list`, `project/search`, `project/stat` and
+`project/edit` are delivered and dogfooded. `project/test` is not started.
 
 ## 1. The question
 
@@ -325,10 +325,103 @@ something the deterministic suite did not.** A1 recorded two such defects; this
 is the next. The pattern is that unit tests assert on values while these gates
 assert on what a person can actually see and do.
 
-## 9. Next
+### Reproducibility, and what an image digest is worth
 
-`project/edit` with version-anchored mutation, where the interesting question is
-conflict semantics rather than the edit itself. Then `project/test`.
+The image was built twice from the same coordinates: once from the local
+working repositories, and once from the published remotes after pushing. Same
+size, identical gate results, identical positive and negative probes — and a
+**different SHA-256**, differing across 56,469,352 bytes rather than in a
+timestamp field.
+
+So `native-image` output is not bit-reproducible in this toolchain. The digest
+recorded in `artifacts/a2-native-evidence.edn` identifies *one artifact*; it is
+not evidence about a source coordinate, and the artifact records that rather
+than letting the digest imply more than it can carry. The reproducible parts are
+the source coordinates and the gate results.
+
+## 9. `project/stat` and `project/edit`
+
+The first A2 capability that changes the world. The interesting part is not the
+write but what it refuses.
+
+An edit must state the version it believed:
+
+```clojure
+(project/edit {:path "src/quarry/lattice.clj"
+               :base {:digest "sha256:..."}   ; from project/stat, or :absent
+               :content "..."})
+```
+
+If the file changed since that digest, the edit is refused as a conflict rather
+than applied. **There is no way to spell a blind overwrite** — omitting `:base`
+is an error, not a default. That matters even in single-player, because the
+human, an external editor, a formatter and a Git checkout all write to the same
+world the agent is reading.
+
+Writes go to a sibling temporary and are renamed, so a reader never observes a
+partial file and a failed write leaves the original untouched. Traversal follows
+`project/list`'s rules exactly.
+
+**Not claimed:** this is compare-and-swap by *observation*, not an atomic one.
+The digest is read, compared, and then the rename happens; a writer that changes
+the file inside that window is not detected. For one operator and one agent that
+is the honest boundary.
+
+Write authority gets its own profile. `:agent/project-survey` stays read-only
+and gains only `project/stat`, so a surveying context remains a meaningful thing
+to grant; `:agent/project-develop` is the profile that can change the project,
+and is now the session default.
+
+### Dogfood: it made the change
+
+Asked to change `spacing` from 7 to 11 in a fixture and *change nothing else*,
+against the real capability set:
+
+```text
+(project/search "spacing")
+(project/read "src/quarry/lattice.clj")
+(project/edit {... :base "<the file's content>" ...})   ; refused
+(project/stat "src/quarry/lattice.clj")
+(project/edit {... :base {:digest "sha256:3fca4a4b..."} ...})
+```
+
+The file was changed correctly and nothing else was touched.
+
+### The refusal was not teaching anything
+
+The way it succeeded was the finding. The model guessed `:base` as the file's
+*content* rather than a digest — a reasonable guess — and the refusal it
+received said only `:bb4t-evaluation-failure` with an empty data map. The kernel
+had authored a message for exactly that mistake and bbagent was **throwing it
+away**: it kept `ex-data` and dropped `ex-message`, so every refusal in the
+product reduced to its category. The model recovered by spending an action on
+`(doc project/edit)`.
+
+A second defect sat underneath: SCI rethrows an evaluation failure with its own
+location data and keeps the original as a cause, so reading `ex-data` off the
+caught exception had been finding SCI's map rather than the kernel's. `:bb4t/data`
+was empty even before the message was dropped.
+
+Both fixed. What reaches the model is an **allowlist rather than a filter**, so a
+key added to a failure somewhere in the kernel stays invisible until someone
+decides it is safe. A conflict now reports both the digest it expected and the
+digest it found, so an agent can re-anchor and retry without a second `stat`.
+
+Same task, before and after:
+
+| | Actions | Errors | Result |
+|---|---:|---:|---|
+| before | 8 | 1 | correct, after a `doc` round-trip and a verifying re-read |
+| after | **5** | 1 | correct, straight from the refusal to `stat` |
+
+The one error is the same wrong guess both times. What changed is that the
+refusal now tells the model what shape it should have used, instead of only that
+something failed.
+
+## 10. Next
+
+`project/test`, where the question is what counts as verification rather than
+what counts as running a command.
 
 Two smaller items the dogfood surfaced and did not fix: a broad search returns
 matches from `artifacts/` and `docs/` that crowd out source, which is an
