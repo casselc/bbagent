@@ -22,7 +22,22 @@
             [clojure.pprint :as pprint]
             [clojure.string :as str]))
 
-(def variants [:none :minimal :generated :grounded])
+(def variants [:none :minimal :generated :grounded :derived])
+
+(defn- schedule
+  "Interleaves variants and rotates their order each repetition.
+
+   The A1.1 review found the first comparison ran variant by variant, all
+   :none runs and then all :minimal runs, which confounds run order with
+   variant and cost that comparison its elapsed-time result. Rotating means
+   no variant keeps a fixed position, so a drifting endpoint spreads across
+   variants instead of loading onto one."
+  [reps]
+  (for [index (range 1 (inc reps))
+        variant (let [n (count variants)
+                      offset (mod (dec index) n)]
+                  (concat (drop offset variants) (take offset variants)))]
+    [variant index]))
 
 (def ^:private discovery-pattern #"\(\s*(apropos|doc)\b")
 
@@ -117,10 +132,10 @@
         prompt (str/join " " prompt)
         _ (println "prompt:" (pr-str prompt))
         _ (println "model:" model "| repetitions per variant:" reps)
+        _ (println "order: interleaved, rotated per repetition")
         observations
         (doall
-         (for [variant variants
-               index (range 1 (inc reps))]
+         (for [[variant index] (schedule reps)]
            (let [o (run-once! {:state-root state-root
                                :project-root project-root
                                :endpoint endpoint

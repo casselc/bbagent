@@ -31,6 +31,7 @@
   (is (= :minimal (orientation/mode "minimal")))
   (is (= :generated (orientation/mode :generated)))
   (is (= :grounded (orientation/mode :grounded)))
+  (is (= :derived (orientation/mode :derived)))
   (testing "a coordinate written before orientation existed resolves to :none"
     (is (= :none (orientation/mode
                   (get-in {:session/coordinate {:prompt {}}}
@@ -131,7 +132,7 @@
     (let [state-root (temp-root "bbagent-orientation-coordinate")
           digests
           (into {}
-                (for [m [:none :minimal :generated :grounded]]
+                (for [m [:none :minimal :generated :grounded :derived]]
                   (let [s (session/start! {:state-root state-root
                                            :project-root (project)
                                            :model-provider (provider/fake [])
@@ -144,7 +145,7 @@
                       [m (get-in s [:coordinate :prompt :system/digest])]
                       (finally (session/close! s :test-end))))))]
       (testing "each variant is a distinct prompt coordinate"
-        (is (= 4 (count (set (vals digests))))
+        (is (= 5 (count (set (vals digests))))
             "runs must be distinguishable by their prompt digest")))))
 
 (deftest orientation-does-not-change-authority-test
@@ -152,7 +153,7 @@
     (let [state-root (temp-root "bbagent-orientation-authority")
           project-root (project)
           surfaces
-          (for [m [:none :minimal :generated :grounded]]
+          (for [m [:none :minimal :generated :grounded :derived]]
             (let [s (session/start! {:state-root state-root
                                      :project-root project-root
                                      :model-provider (provider/fake [])
@@ -324,3 +325,73 @@
             (is (zero? (get-in d [:context/surface :projected-class-count])))
             (is (zero? (get-in d [:context/surface :supplied-import-count])))))
         (finally (session/close! s :test-end))))))
+
+(def ^:private a2-shaped-context
+  "A surface shaped like the one A2 will create: the enumerating capability
+   :grounded's prose denies is actually granted."
+  {:context/effective {:context/profile :agent/project-rw}
+   :context/surface
+   {:projections
+    [{:sci/var 'project/read :arglists '([relative-path])
+      :effects #{:project/read}
+      :doc "Read a UTF-8 file relative to the authorized project root."}
+     {:sci/var 'project/list :arglists '([relative-path])
+      :effects #{:project/list}
+      :doc "List entries under a directory relative to the project root."}]}})
+
+(deftest grounded-goes-stale-when-a-capability-is-granted-test
+  (testing "the frozen variant contradicts its own operation list in A2"
+    ;; Not a defect in :grounded's measured result, which stands. It is the
+    ;; reason :grounded cannot be the variant A2 ships: its prose states an
+    ;; absence, and an absence is falsified by a grant.
+    (let [out (orientation/compose "base" :grounded a2-shaped-context)]
+      (is (str/includes? out "(project/list relative-path)")
+          "the generated list correctly offers the enumerating operation")
+      (is (str/includes? out "You have no file listing")
+          "while the frozen prose simultaneously denies it")
+      (is (str/includes? out "You cannot enumerate a directory")
+          "and instructs the model not to use what it was just granted"))))
+
+(deftest derived-does-not-go-stale-test
+  (testing "the derived variant states closure, so a grant cannot falsify it"
+    (let [out (orientation/compose "base" :derived a2-shaped-context)]
+      (is (str/includes? out "(project/list relative-path)"))
+      (testing "it denies nothing the surface grants"
+        (doseq [stale ["You have no file listing"
+                       "You cannot enumerate a directory"
+                       "never say what a project contains"
+                       "say that you cannot enumerate"]]
+          (is (not (str/includes? out stale))
+              (str "derived orientation must not assert: " stale))))
+      (testing "it still closes the surface"
+        (is (str/includes? out "your whole authority over this project"))
+        (is (str/includes? out "Anything not in it is unavailable to you")))
+      (testing "it still constrains claims to what operations returned"
+        (is (str/includes? out "Only state what your operations actually returned"))
+        (is (str/includes? out "is not evidence about the world"))))))
+
+(deftest derived-names-no-capability-test
+  (testing "nothing in the derived text names a capability, present or absent"
+    ;; The generated operation list is derived and may name operations. The
+    ;; prose around it may not, or it becomes the parallel prose this
+    ;; namespace exists to avoid.
+    (let [prose (str orientation/derived-constraint)]
+      (doseq [noun ["file listing" "search" "shell" "process" "network"
+                    "host API" "directory" "enumerate" "edit" "project/"]]
+        (is (not (str/includes? (str/lower-case prose)
+                                (str/lower-case noun)))
+            (str "the derived constraint must not name: " noun))))))
+
+(deftest derived-closure-counts-the-real-surface-test
+  (testing "the closure statement counts what is actually projected"
+    (is (str/includes? (orientation/derived-preamble a2-shaped-context)
+                       "those 2 operations are your whole authority"))
+    (let [many (mapv (fn [n] {:sci/var (symbol "ns" (str "op" n))
+                              :arglists '([x])
+                              :doc (str "Operation " n)})
+                     (range 40))
+          out (orientation/derived-preamble
+               {:context/surface {:projections many}})]
+      (testing "a truncated surface is closed over the true count, not the shown one"
+        (is (str/includes? out "returns all 40"))
+        (is (not (str/includes? out "That list is complete")))))))

@@ -8,12 +8,50 @@ section 10. The review upheld the verdict, fixed three defects, and corrected
 three claims. New sessions now default to `:grounded`; a resumed session keeps
 the orientation it was started with unless that run overrides it.
 
-A2 is not open. Before it begins, one entry condition carried out of the A1.1
-review must be satisfied: **absent authority is asserted as a hardcoded constant
-in three places** — the base system prompt, the generated preamble, and the
-grounding constraint — and all three become false the moment `project/list`
-exists. They must derive from the effects the context actually grants. See
-`docs/A1_1_FINDINGS.md` section 9.
+## A2 entry condition: partly satisfied
+
+A2 is not open. Its entry condition, carried out of the A1.1 review, is that
+**absent authority is asserted as a hardcoded constant in three places** — the
+base system prompt, the generated preamble, and the grounding constraint — all
+of which become false the moment `project/list` exists.
+
+**What the investigation changed.** The condition originally said these claims
+must derive from the effects the context grants. They cannot. The runtime's
+`:compiled/capabilities` equals its authorized grants exactly, so the
+description knows only what the context *has*; there is no wider universe to
+subtract from and therefore no way to derive "you have no file listing". Asking
+bb4t for one would have meant teaching the runtime about capabilities it was not
+compiled with.
+
+The fix is to stop asserting absence. **Closure is derivable and absence is
+not**, and closure carries the same practical meaning: "these N operations are
+your whole authority, anything not in the list is unavailable" entails "you have
+no file listing" for the A0 surface, while staying true of every other surface.
+
+**Implemented:** a fifth orientation variant, `:derived`, whose closing states
+closure over the actual projections and whose claim constraint refers
+structurally to the generated list rather than naming any capability. Pinned by
+tests that build an A2-shaped context granting `project/list` and assert that
+`:grounded` contradicts its own operation list there while `:derived` does not.
+No bb4t change was needed after all.
+
+**Still open, and owned by A2:**
+
+- `:derived` is not live-measured. `:grounded` remains the default because it
+  is the variant A1.1 measured at 3/3, and this repository does not flip a
+  default on deterministic evidence alone. A2 should re-run the comparison —
+  the harness now interleaves and rotates variant order, closing the confound
+  the review found — and flip the default if `:derived` holds up;
+- `resources/bbagent/system.txt` still contains one enumerated-absence
+  sentence. It is deliberately unchanged: it is the frozen A0/A1/A1.1 baseline
+  whose digest anchors the recorded prompt coordinates, and its claim is still
+  true. A2 changes it in the same measured step that flips the default;
+- A2's measurement target changes once `project/list` exists. "Concluded the
+  limitation" is the right answer only while enumeration is missing; afterwards
+  the right answer is a correct enumeration, and `concludes-limitation?` in the
+  harness measures the wrong thing.
+
+See `docs/A1_1_FINDINGS.md` section 9 and section 10.
 
 A1 is complete and frozen at `bbagent-a1`. Its findings are in
 `docs/A1_FINDINGS.md`.
