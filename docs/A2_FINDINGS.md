@@ -259,7 +259,73 @@ monotonically reduce work; it changes what the model has to filter.** Single
 sessions are not a measurement, and this one is reported because it is
 unflattering rather than despite it.
 
-## 8. Next
+## 8. Native and PTY evidence
+
+Previously the standing gap: every A2 claim was a JVM claim. It is now closed
+for the capabilities delivered so far. `artifacts/a2-native-evidence.edn` holds
+the coordinates.
+
+Built by `script/build-native` from the local working repositories at bb4t
+`05fd11a9` and bbagent `982bafc7`, producing a 74,909,952-byte image.
+
+**A2 added no reachability metadata, no build flag, and no dependency.** That is
+worth stating because A1 needed two native-image additions for JLine and charm,
+both found as real failures. `project/list` and `project/search` use only
+`java.nio.file` APIs the image already reached through `project/read`, and the
+expanded `base-allow` is pure Clojure. The image grew by roughly the code added.
+
+### Authority in the image
+
+```clojure
+:context/grants #{:project/read :project/list :project/search
+                  :data/json-write :data/json-read}
+:projected-class-count 0
+:supplied-import-count 0
+:negative-probe/count 35
+:positive-probes {:core :ok :json-read :ok :json-write :ok
+                  :project-read :ok :project-list :ok :project-search :ok
+                  :composition :ok}
+```
+
+The native authority smoke previously exercised only the two operations A0
+shipped with, so an image could have lost either new capability and the build
+would still have passed. It now evaluates both plus a composition — `defn`,
+`mapv` and `str/join` over a listing — and the build gates on all three. The
+point is that positives and negatives hold **together**: the image gained the
+project world and the model gained no class and no import.
+
+### PTY: 25 gates, all passing
+
+`script/tui-native-proof.py` drives the real executable in a real PTY. Eight
+gates are new for A2: the capability pane shows both new operations because it
+projects the real context description; the operator REPL calls `project/list`
+and `project/search` natively; `defn` defines a helper; `str/` composes over a
+capability result; a lazy result is readable; and on resume both the capability
+pane and the **agent-authored helper** come back — a helper is computational
+state, and replay has to reconstruct it exactly as it does a `def`.
+
+### The gate found a defect the JVM suite could not
+
+`native_lazy_visible` asserted that a listing's contents appear on screen. They
+did not. The operator REPL pane rendered only the result *status*:
+
+```text
+repl> (take 1 (map :name (project/list "."))) => :ok
+```
+
+Every successful evaluation read `=> :ok` whatever it produced. That was
+survivable while the bounded surface returned arithmetic; once a capability
+returns a listing or search matches, the value is the entire reason for running
+the form, and the operator could not see it. Now the pane summarizes the value,
+bounded, with errors reporting their category and oversized values their preview
+and size.
+
+**This is the third consecutive milestone in which the native gate caught
+something the deterministic suite did not.** A1 recorded two such defects; this
+is the next. The pattern is that unit tests assert on values while these gates
+assert on what a person can actually see and do.
+
+## 9. Next
 
 `project/edit` with version-anchored mutation, where the interesting question is
 conflict semantics rather than the edit itself. Then `project/test`.

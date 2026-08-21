@@ -53,7 +53,14 @@ Three defects that only appeared from using it, all fixed; see
   0/3 before, 3/3 after, with zero REPL errors after;
 - live self-dogfood against this repository: 13 actions / 5 errors before the
   fixes, 6 actions / 0 errors after;
-- **not yet done:** native build and PTY evidence for any A2 change.
+- native image built from local coordinates with **no new reachability
+  metadata, build flag, or dependency**; authority in the image shows the A2
+  grants with `:projected-class-count 0` and `:supplied-import-count 0`
+  alongside all 35 negatives;
+- **25 PTY gates pass**, eight of them new for A2, including the operator REPL
+  driving both capabilities natively and an agent-authored helper surviving
+  resume. The gate found a defect the suite could not: the REPL pane rendered
+  only the result status, never the value.
 
 ### Still open in A2
 

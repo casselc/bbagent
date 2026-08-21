@@ -1,0 +1,49 @@
+{:milestone :a2
+ :evidence :native-and-pty
+ :result :pass
+
+ :coordinate
+ {:bb4t/commit "05fd11a9abb61b991ee136f2dfad1debfb8a0091"
+  :bbagent/commit "982bafc7c87fce788311b5e4b724b682a86e87e5"
+  :builder "script/build-native"
+  :source "local working repositories, not the published remotes"}
+
+ :image
+ {:path "dist/bbagent"
+  :bytes 74909952
+  :sha256 "bf79e0359135112e4fb4b12e926124f421a0c2d1b0b8538043231c165710fe02"
+  :sidecar "libsqlitejdbc.so, pinned digest unchanged"
+  :platform {:os "Ubuntu" :arch "x86_64" :libc "glibc"}
+  :toolchain {:graalvm "Oracle GraalVM 25.0.4+7.1" :java "25.0.4"}
+  :native-image-additions :none
+  :note "A2 added no reachability metadata, no build flag, and no dependency"}
+
+ :authority
+ {:context/grants #{:project/read :project/list :project/search
+                    :data/json-write :data/json-read}
+  :projected-class-count 0
+  :supplied-import-count 0
+  :negative-probe/count 35
+  :positive-probes {:core :ok :json-read :ok :json-write :ok
+                    :project-read :ok :project-list :ok :project-search :ok
+                    :composition :ok}
+  :claim "the image gained the project world; the model gained no class and no import"}
+
+ :pty
+ {:harness "script/tui-native-proof.py"
+  :gates 25
+  :passed 25
+  :a2-gates [:capability_pane_a2 :native_project_list :native_project_search
+             :native_defn :native_composition :native_lazy_visible
+             :resume_capabilities_a2 :operator_defn_survives_resume]
+  :defect-found-by-gate
+  {:what "the operator REPL rendered only the result status, never the value"
+   :how "the gate asserted a listing's contents appear on screen; they did not"
+   :fixed-in "982bafc7c87fce788311b5e4b724b682a86e87e5"}}
+
+ :nonclaims
+ ["Linux x86_64 glibc only; no cross-platform or static-linking claim"
+  "built from local working repositories, so these coordinates are not fetchable from the published remotes until pushed"
+  "no JVM/native suite parity claim; the native evidence is the smoke, the authority corpus and the PTY gates, not the 132-test suite"
+  "the PTY gates assert on rendered text, so they prove an operator can see a result, not that the rendering is correct in every terminal"
+  "no live model call in the PTY proof; the endpoint is deliberately unroutable"]}
