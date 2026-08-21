@@ -152,12 +152,9 @@ def run(dist, state_root, project_root):
     s.send(b'(str "LAZY-" (first (take 1 (map :name (project/list ".")))))\r',
            settle=5.0)
 
-    # The write path at a real terminal: an anchored edit applies, and the now
-    # stale base is refused rather than clobbering what replaced it.
-    # The write path runs in its own session further down, not this one. A
-    # session that edits cannot currently be resumed -- replay re-executes the
-    # edit against a world it already changed -- and this session is the one
-    # the resume phase reopens. See docs/A2_FINDINGS.md.
+    # The write path runs in its own session further down, so that this
+    # session's resume exercises reconstruction of observations while that
+    # one exercises reconstruction of a change.
 
     # Operator and model share one bounded Context, so an operator definition
     # must be journaled and reconstructed on resume.  Define it here and read
@@ -210,10 +207,9 @@ def run(dist, state_root, project_root):
         gates["resume_starts"] = False
 
     # --- third process: the write path, in a session of its own -------------
-    # Kept separate because a session that edits cannot be resumed today, and
-    # the session above has to stay resumable. Every form is one line: a real
-    # newline inside a byte literal is an Enter keypress, which submits a
-    # half-typed form and corrupts everything after it.
+    # Every form is one line: a real newline inside a byte literal is an Enter
+    # keypress, which submits a half-typed form and corrupts everything after
+    # it.
     s3 = Session([exe, "tui", "--project", project_root], dist, env)
     s3.pump(12.0)
     s3.send(b"\x14", settle=1.5)  # Ctrl-T: operator repl mode
@@ -233,6 +229,42 @@ def run(dist, state_root, project_root):
     s3.send(b'(str "KEPT-" (project/read "native-proof.txt"))\r', settle=6.0)
     s3.send(b"\x11", settle=3.0)
     gates["write_session_clean_exit"] = s3.wait(timeout=60) == 0
+
+    # --- fourth process: resume the session that changed the project --------
+    # A2's blocking defect was that this was impossible: replay re-executed
+    # the edit against a world it had already changed, version anchoring
+    # refused it, and recovery refused the session. Recovery now substitutes
+    # the operation's recorded receipt, so the binding comes back and the
+    # write is not issued again.
+    after_write = subprocess.run(
+        [exe, "sessions", "--store", "sqlite"],
+        cwd=dist, env=env, capture_output=True, text=True, timeout=120,
+    )
+    write_ids = [line.strip() for line in after_write.stdout.splitlines()
+                 if line.strip() and line.strip() not in ids]
+    gates["write_session_listed"] = len(write_ids) == 1
+    if write_ids:
+        edited_before_resume = open(
+            os.path.join(project_root, "native-proof.txt")).read()
+        s4 = Session([exe, "tui", write_ids[0], "--store", "sqlite"], dist, env)
+        s4.pump(14.0)
+        gates["resume_after_edit_starts"] = "bbagent" in s4.text()
+        s4.send(b"\x14", settle=1.5)  # Ctrl-T: operator repl mode
+        # `applied` is the value the edit returned. Its reconstruction is the
+        # whole point: the session resumes holding what it computed, without
+        # the computation being performed against the project a second time.
+        s4.send(b'(str "REPLAYED-" (:bytes applied))\r', settle=6.0)
+        s4.send(b'(str "UNCHANGED-" (project/read "native-proof.txt"))\r',
+                settle=6.0)
+        s4.send(b"\x11", settle=3.0)
+        gates["resume_after_edit_clean_exit"] = s4.wait(timeout=60) == 0
+        gates["resume_after_edit_wrote_nothing"] = (
+            edited_before_resume
+            == open(os.path.join(project_root, "native-proof.txt")).read()
+        )
+        ids = ids + write_ids
+    else:
+        gates["resume_after_edit_starts"] = False
 
     # Semantic gates read the journal, not the screen.
     #
@@ -281,6 +313,15 @@ def journal_gates(state_root, ids):
         "journal_conflict_kept_content": '"KEPT-twotwo"' in blob,
         "journal_operator_state_survives_resume": '"RESUMED-42"' in blob,
         "journal_helper_survives_resume": '"HELPER-README.md"' in blob,
+        # A2's blocking defect, now its property: the edit's own result comes
+        # back on resume, and the file it wrote is not written again.
+        "journal_edit_result_survives_resume": '"REPLAYED-6"' in blob,
+        "journal_edit_not_reapplied": '"UNCHANGED-twotwo"' in blob,
+        # Payloads are stored as the canonical tagged tree, not as EDN maps,
+        # so the claim is spelled the way the store actually spells it.
+        "journal_replay_exact": (
+            '[[:keyword nil "exact?"] [:boolean true]]' in blob
+        ),
     }
 
 

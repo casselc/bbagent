@@ -359,7 +359,14 @@
               "the result immediately after the request carries the same action")
           (is (= [3 4 5 6 7] (mapv :event/seq after-request)))
           (is (= [] (store/events-after store alpha-session-id "evt-a-07")))
-          (is (nil? (store/request-event store alpha-session-id "req-none")))))
+          (is (nil? (store/request-event store alpha-session-id "req-none")))
+          (is (= "evt-a-03"
+                 (:event/id (store/result-event store alpha-session-id "req-1")))
+              "a request's result is found by the same key its request is")
+          (is (= :repl/result
+                 (:event/type (store/result-event store alpha-session-id
+                                                  "req-1"))))
+          (is (nil? (store/result-event store alpha-session-id "req-none")))))
 
       (testing "latest checkpoint and first-event selection"
         (let [checkpoint (store/latest-checkpoint store alpha-session-id)]

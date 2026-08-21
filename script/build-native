@@ -149,6 +149,55 @@ then
   echo "S0b native CAS or replay evidence is incomplete" >&2
   exit 1
 fi
+# A2 recovery semantics, in the image rather than only on the JVM: a session
+# that observed the project and then changed it is resumed after the world has
+# moved on.  The observation must come back as the session recorded it and the
+# change must not be made a second time.
+S0B_REPLAY_STATE="$BUILD_ROOT/s0b-replay-state"
+S0B_REPLAY_PROJECT="$BUILD_ROOT/s0b-replay-project"
+mkdir "$S0B_REPLAY_PROJECT"
+printf 'A2 replay fixture, as the session observed it.\n' \
+  > "$S0B_REPLAY_PROJECT/README.md"
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" s0b-native-smoke \
+  --phase replay-create --state "$S0B_REPLAY_STATE" \
+  --session s0b-native-replay --project "$S0B_REPLAY_PROJECT" \
+  > "$BUILD_ROOT/s0b-replay-create.edn"
+printf 'A2 replay fixture, rewritten while the process was stopped.\n' \
+  > "$S0B_REPLAY_PROJECT/README.md"
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" s0b-native-smoke \
+  --phase replay-resume --state "$S0B_REPLAY_STATE" \
+  --session s0b-native-replay > "$BUILD_ROOT/s0b-replay-resume.edn"
+if ! grep -Fq ':replay/file-content "seed!"' "$BUILD_ROOT/s0b-replay-create.edn" || \
+   ! grep -Fq '[:project/edit :ok]' "$BUILD_ROOT/s0b-replay-create.edn"
+then
+  echo "A2 native replay fixture did not record its change" >&2
+  exit 1
+fi
+if ! grep -Fq ':replay/file-content "seed!"' "$BUILD_ROOT/s0b-replay-resume.edn"
+then
+  echo "A2 native resume re-applied a recorded change" >&2
+  exit 1
+fi
+if ! grep -Fq 'A2 replay fixture, as the session observed it.' \
+     "$BUILD_ROOT/s0b-replay-resume.edn"
+then
+  echo "A2 native resume did not reconstruct the recorded observation" >&2
+  exit 1
+fi
+if grep -Fq 'rewritten while the process was stopped' \
+     "$BUILD_ROOT/s0b-replay-resume.edn"
+then
+  echo "A2 native resume re-observed the project instead of reconstructing" >&2
+  exit 1
+fi
+if ! grep -Fq ':exact? true' "$BUILD_ROOT/s0b-replay-resume.edn" || \
+   ! grep -Fq ':reconstructed 3' "$BUILD_ROOT/s0b-replay-resume.edn" || \
+   ! grep -Fq ':legacy 0' "$BUILD_ROOT/s0b-replay-resume.edn"
+then
+  echo "A2 native resume did not claim an exact reconstruction" >&2
+  exit 1
+fi
+
 TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" sessions \
   --state "$S0B_STATE" --store sqlite > "$BUILD_ROOT/s0b-sessions.txt"
 TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" inspect s0b-native-main \
@@ -326,6 +375,8 @@ fi
     "$DIST_DIR/THIRD_PARTY_NOTICES.md" "$BUILD_ROOT/native-smoke.edn" \
     "$BUILD_ROOT/native-smoke.db" "$BUILD_ROOT/relocated-smoke.edn" \
     "$BUILD_ROOT/s0b-create.edn" "$BUILD_ROOT/s0b-resume.edn" \
+    "$BUILD_ROOT/s0b-replay-create.edn" \
+    "$BUILD_ROOT/s0b-replay-resume.edn" \
     "$BUILD_ROOT/s0b-sessions.txt" "$BUILD_ROOT/s0b-inspect.edn" \
     "$BUILD_ROOT/s0b-ambiguous-exit.edn" \
     "$BUILD_ROOT/s0b-ambiguous-check.edn" \

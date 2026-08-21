@@ -489,6 +489,23 @@
       (catch Throwable failure
         (throw (recovery-failure failure)))))))
 
+(defn result-event [store session-id request-id]
+  (locking (:lock store)
+    (ensure-open! store)
+    (store/validate-session-id! session-id)
+    (let [^Connection connection (:connection store)]
+      (try
+        (when-let [row (first-row connection
+                                  (str "SELECT " event-columns
+                                       " FROM event WHERE session_id = ?
+                                         AND request_id = ?
+                                         AND event_type = 'repl/result'
+                                         ORDER BY seq ASC LIMIT 1")
+                                  session-id request-id)]
+          (row->event connection session-id row))
+        (catch Throwable failure
+          (throw (recovery-failure failure)))))))
+
 (defn list-sessions [store]
   (locking (:lock store)
     (ensure-open! store)
@@ -585,6 +602,8 @@
     (latest-checkpoint store session-id))
   (request-event [store session-id request-id]
     (request-event store session-id request-id))
+  (result-event [store session-id request-id]
+    (result-event store session-id request-id))
   (list-sessions [store]
     (list-sessions store)))
 

@@ -453,6 +453,12 @@
       (first (filter #(and (= :repl/request (:event/type %))
                             (= request-id (:request/id %)))
                      (cached-events this session-id)))))
+  (result-event [this session-id request-id]
+    (locking op-lock
+      (ensure-open! this)
+      (first (filter #(and (= :repl/result (:event/type %))
+                           (= request-id (:request/id %)))
+                     (cached-events this session-id)))))
   (list-sessions [this]
     (locking op-lock
       (ensure-open! this)

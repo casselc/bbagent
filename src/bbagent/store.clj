@@ -36,6 +36,15 @@
     "Returns the most recent :session/checkpoint event, or nil.")
   (request-event [store session-id request-id]
     "Returns the earliest :repl/request carrying the request ID, or nil.")
+  (result-event [store session-id request-id]
+    "Returns the earliest :repl/result carrying the request ID, or nil.
+
+     Recovery needs the operation receipts of a form that a checkpoint
+     summarized.  A checkpoint carries the source, not the receipts: it is
+     rewritten in full on every evaluation, so inlining a form's recorded
+     results there would make the journal quadratic in the bytes those
+     results occupy.  The receipts stay on the one event that records them
+     and are found again through this bounded lookup.")
   (recent-events [store session-id limit]
     "Returns at most limit most-recent events, in ascending :event/seq order.
 

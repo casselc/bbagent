@@ -2,15 +2,18 @@
   (:require [bb4t.context :as context]
             [bb4t.events :as events]
             [bb4t.runtime :as runtime]
+            [bb4t.transcript :as transcript]
             [bbagent.errors :as errors]))
 
 (def profiles
   "The context specs bbagent can ask bb4t for.
 
   :agent/project-read is the frozen A0/A1/A1.1 surface and is kept so a
-  recorded coordinate can be reproduced exactly. :agent/project-survey is the
-  A2 surface: the same authority plus directory listing, which the A1.1
-  measurement showed the model correctly reporting as its missing capability.
+  recorded coordinate can be reproduced exactly. :agent/project-survey adds
+  the observing capabilities A2 delivered -- listing, search and stat -- and
+  stays read-only, so surveying a project remains a meaningful thing to
+  authorize. :agent/project-develop is that surface plus project/edit, and is
+  what a session defaults to.
 
   Every spec here is requested and authorized identically. bbagent asks for
   what it is willing to be held to; it does not hold authority in reserve."
@@ -87,18 +90,71 @@
       :runtime/description (runtime/describe runtime)
       :context/description (context/describe context)})))
 
-(defn evaluate [{:keys [context]} source]
-  (try
-    {:status :ok :evaluation (context/evaluate context source)}
-    (catch Throwable failure
-      ;; The message is the diagnostic. Dropping it made a refusal say only
-      ;; that something failed, so the model had to guess at the shape it got
-      ;; wrong instead of being told. bb4t's failure messages are authored
-      ;; strings and interpolate no host path.
-      (let [normalized (errors/normalize-bb4t failure)]
-        {:status :error
-         :error (assoc (ex-data normalized)
-                       :error/message (ex-message normalized))}))))
+(defn- transcript-for
+  "The transcript one evaluation runs under.
+
+   nil is the ordinary path and records nothing, so an evaluation that is
+   neither being journaled nor being recovered behaves exactly as it always
+   did."
+  [{:keys [transcript receipts]}]
+  (case transcript
+    :record (transcript/recorder)
+    :replay (transcript/player receipts)
+    :legacy (transcript/legacy)
+    nil nil
+    (throw (errors/error :agent-invalid-action "Unknown transcript mode"
+                         {:transcript transcript}))))
+
+(defn- with-transcript
+  "Attaches what the transcript observed to a result.
+
+   Recording is attached to a failed evaluation too: a form that changed the
+   project and then failed has still changed it, and its receipt is the only
+   record that it did."
+  [result mode handle]
+  (case mode
+    :record (assoc result :operations (transcript/operations handle))
+    :legacy (assoc result :observations (transcript/observations handle))
+    result))
+
+(defn evaluate
+  "Evaluates source in the session's bounded Context.
+
+   options selects what happens at the semantic operation boundary:
+
+     nil                      evaluate; record nothing
+     {:transcript :record}    invoke operations and record their receipts,
+                              returned as :operations
+     {:transcript :replay
+      :receipts [...]}        reproduce those receipts instead of invoking
+                              anything, failing closed on any divergence
+     {:transcript :legacy}    for source recorded before receipts existed:
+                              re-observe, refuse to actuate, and report what
+                              was re-observed as :observations
+
+   A replay that diverged returns :transcript/error naming the divergence.
+   That is not the same thing as a form that failed, and recovery must not
+   read it as one: a status can match while the reconstruction is wrong."
+  ([runtime source] (evaluate runtime source nil))
+  ([{:keys [context]} source options]
+   (let [mode (:transcript options)
+         handle (transcript-for options)]
+     (try
+       (-> {:status :ok :evaluation (context/evaluate context source handle)}
+           (with-transcript mode handle))
+       (catch Throwable failure
+         ;; The message is the diagnostic. Dropping it made a refusal say only
+         ;; that something failed, so the model had to guess at the shape it got
+         ;; wrong instead of being told. bb4t's failure messages are authored
+         ;; strings and interpolate no host path.
+         (let [normalized (errors/normalize-bb4t failure)]
+           (cond-> (-> {:status :error
+                        :error (assoc (ex-data normalized)
+                                      :error/message (ex-message normalized))}
+                       (with-transcript mode handle))
+             (errors/transcript-error failure)
+             (assoc :transcript/error (errors/transcript-error failure)
+                    :transcript/message (ex-message normalized)))))))))
 
 (defn subscribe! [{:keys [runtime]} subscriber]
   (events/subscribe runtime subscriber))

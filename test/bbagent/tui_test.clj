@@ -15,6 +15,7 @@
             [bbagent.tui.state :as state]
             [bbagent.tui.viewmodel :as vm]
             [charm.message :as msg]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]])
   (:import [java.nio.file Files]))
@@ -749,22 +750,21 @@
           (is (<= (count lines) rows)
               (str "frame must fit " rows " rows, produced " (count lines))))))))
 
-(deftest a-session-that-edited-cannot-be-resumed-test
-  (testing "an effectful form replayed on resume fails closed"
-    ;; A2's blocking defect, pinned so it cannot regress silently while it is
-    ;; open. Computational replay rebuilds SCI state by re-running the
-    ;; session's forms, which assumes they can be run again. project/edit
-    ;; cannot: version anchoring makes re-application a conflict by design, so
-    ;; a form recorded :ok replays :error and recovery refuses the session.
+(deftest a-session-that-edited-resumes-without-editing-again-test
+  (testing "a durable session that changed the project is resumable"
+    ;; A2's blocking defect, now the property that replaced it. Replay used to
+    ;; rebuild SCI state by re-running the session's forms, which assumes they
+    ;; can be run again. project/edit cannot: version anchoring makes
+    ;; re-application a conflict by design, so a form recorded :ok replayed
+    ;; :error and recovery refused the session.
     ;;
-    ;; Failing closed is the right behaviour for the wrong situation. It is
-    ;; not silent corruption and not a double write, but it does mean a
-    ;; durable session that changed a file is unresumable, which the product
-    ;; cannot ship. The fix is to reconstruct an effectful form's recorded
-    ;; result rather than re-execute it; see docs/A2_FINDINGS.md.
+    ;; Recovery now recomputes the form and substitutes the operation's
+    ;; recorded receipt, so the binding comes back without the write being
+    ;; issued a second time.
     (let [state-root (temp-root "bbagent-edit-resume")
           project-root (project)
           session-id "edit-then-resume"
+          created (io/file project-root "created.txt")
           s (session/start! {:state-root state-root
                              :project-root project-root
                              :model-provider (provider/fake [])
@@ -772,18 +772,25 @@
                              :session-id session-id
                              :store-backend :sqlite})]
       (is (= :ok (:status (session/operator-evaluate!
-                           s (str "(project/edit {:path \"created.txt\" "
-                                  ":base :absent :content \"one\"})")))))
+                           s (str "(def applied (project/edit "
+                                  "{:path \"created.txt\" "
+                                  ":base :absent :content \"one\"}))")))))
       (session/close! s :test-end)
-      (let [failure (try
-                      (session/resume! {:state-root state-root
-                                        :session-id session-id
-                                        :model-provider (provider/fake [])
-                                        :system-prompt "base"
-                                        :store-backend :sqlite})
-                      nil
-                      (catch clojure.lang.ExceptionInfo e e))]
-        (is (some? failure) "resume must not silently succeed")
-        (is (= :session-recovery-failure (:bbagent/error (ex-data failure))))
-        (is (= :ok (get-in (ex-data failure) [:error/data :expected-status])))
-        (is (= :error (get-in (ex-data failure) [:error/data :actual-status])))))))
+      (is (= "one" (slurp created)))
+      (let [resumed (session/resume! {:state-root state-root
+                                      :session-id session-id
+                                      :model-provider (provider/fake [])
+                                      :system-prompt "base"
+                                      :store-backend :sqlite})]
+        (try
+          (is (= "one" (slurp created))
+              "resume must not issue the write a second time")
+          (is (= 3 (get-in (session/operator-evaluate! resumed "(:bytes applied)")
+                           [:evaluation :value :value/data]))
+              "the binding the edit produced is reconstructed")
+          (let [resume-event (->> (session/session-events resumed)
+                                  (filter #(= :session/resumed (:event/type %)))
+                                  last)]
+            (is (true? (get-in resume-event [:session/replay :exact?]))
+                "and the session records that nothing was re-observed"))
+          (finally (session/close! resumed :test-end)))))))

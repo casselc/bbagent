@@ -202,6 +202,16 @@
                                           :session-id (:session options)})))
       "resume" (prn (s0b-smoke/resume! {:state-root (:state options)
                                          :session-id (:session options)}))
+      "replay-create"
+      (do
+        (when-not (:project options)
+          (throw (ex-info "S0b replay create requires --project PATH" {})))
+        (prn (s0b-smoke/replay-create! {:state-root (:state options)
+                                        :project-root (:project options)
+                                        :session-id (:session options)})))
+      "replay-resume"
+      (prn (s0b-smoke/replay-resume! {:state-root (:state options)
+                                      :session-id (:session options)}))
       "ambiguous-exit"
       (do
         (when-not (:project options)
@@ -228,9 +238,11 @@
         "bbagent inspect SESSION_ID [--state PATH] [--store file|sqlite]\n"
         "bbagent s0a-sqlite-smoke --database PATH --project PATH\n"
         "bbagent s0b-native-smoke --phase PHASE --state PATH --session ID [--project PATH]\n"
-       "--profile agent/project-read|agent/project-survey selects the\n"
-       "  capability surface and defaults to agent/project-survey, which\n"
-       "  adds project/list; a resumed session keeps the profile it was\n"
+       "--profile agent/project-read|agent/project-survey|agent/project-develop\n"
+       "  selects the capability surface and defaults to\n"
+       "  agent/project-develop, which can change the project;\n"
+       "  agent/project-survey is read-only and agent/project-read is the\n"
+       "  frozen A0 surface. A resumed session keeps the profile it was\n"
        "  created with\n"
        "--orientation none|minimal|generated|grounded|derived selects the\n"
        "  model capability preamble; it adds no authority and defaults to\n"

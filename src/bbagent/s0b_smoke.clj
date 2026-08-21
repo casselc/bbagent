@@ -96,6 +96,94 @@
         (session/close! agent-session :s0b-native-resume-failed)
         (throw failure)))))
 
+(def ^:private replay-file "replay-proof.txt")
+
+(defn- replay-evidence [agent-session project-root]
+  (let [events (session/session-events agent-session)]
+    {:session/id (:session-id agent-session)
+     :run/id (:run-id agent-session)
+     :replay/file-content (slurp (io/file project-root replay-file))
+     :session/replay (->> events
+                          (filter #(= :session/resumed (:event/type %)))
+                          last
+                          :session/replay)
+     :repl/results (mapv (fn [event]
+                           [(:repl/source
+                             (first (filter #(and (= :repl/request
+                                                     (:event/type %))
+                                                  (= (:request/id event)
+                                                     (:request/id %)))
+                                            events)))
+                            (get-in event [:repl/result :evaluation :value
+                                           :value/data])])
+                         (filter #(= :repl/result (:event/type %)) events))
+     :repl/operations
+     (mapv (fn [event]
+             (mapv (juxt :operation/id :status)
+                   (:repl/operations event)))
+           (filter #(= :repl/result (:event/type %)) events))}))
+
+(defn replay-create!
+  "Creates a session that observes the project and then changes it.
+
+   The native counterpart of the recovery tests: the point is what the second
+   process does with this history, not what this one computes."
+  [{:keys [state-root project-root session-id]}]
+  (let [agent-session
+        (session/start! {:state-root state-root
+                         :project-root project-root
+                         :session-id session-id
+                         :store-backend :sqlite
+                         :system-prompt prompt
+                         :model-provider (provider/fake [])})]
+    (try
+      (spit (io/file project-root replay-file) "seed")
+      (doseq [source [(str "(defn bump [path]"
+                           "  (let [before (project/stat path)"
+                           "        text (project/read path)]"
+                           "    (project/edit {:path path"
+                           "                   :base {:digest (:digest before)}"
+                           "                   :content (str text \"!\")})))")
+                      "(def observed (project/read \"README.md\"))"
+                      (str "(def bumped (bump \"" replay-file "\"))")]]
+        (let [result (session/operator-evaluate! agent-session source)]
+          (when-not (= :ok (:status result))
+            (throw (ex-info "Replay proof setup form failed"
+                            {:source source :result result})))))
+      (let [evidence (replay-evidence agent-session project-root)]
+        (session/close! agent-session :s0b-native-replay-create)
+        evidence)
+      (catch Throwable failure
+        (session/close! agent-session :s0b-native-replay-create-failed)
+        (throw failure)))))
+
+(defn replay-resume!
+  "Resumes that session after the world has moved on.
+
+   Reports what the reconstructed Context holds and what the file on disk now
+   contains, so the harness can assert that the change was not made twice and
+   that the observation was not silently refreshed."
+  [{:keys [state-root session-id]}]
+  (let [agent-session
+        (session/resume! {:state-root state-root
+                          :session-id session-id
+                          :store-backend :sqlite
+                          :system-prompt prompt
+                          :model-provider (provider/fake [])})
+        project-root (get-in (:project agent-session) [:project/root])]
+    (try
+      (doseq [source ["observed" "(:bytes bumped)"]]
+        (let [result (session/operator-evaluate! agent-session source)]
+          (when-not (= :ok (:status result))
+            (throw (ex-info "Replay proof form failed"
+                            {:source source :result result})))))
+      (let [evidence (replay-evidence agent-session project-root)]
+        (session/close! agent-session :s0b-native-replay-resume)
+        evidence)
+      (catch Throwable failure
+        (session/close! agent-session :s0b-native-replay-resume-failed)
+        (throw failure)))))
+
 (defn ambiguous-exit! [{:keys [state-root project-root session-id]}]
   (let [agent-session
         (session/start! {:state-root state-root

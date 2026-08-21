@@ -5,6 +5,7 @@
             [bbagent.journal-test]
              [bbagent.orientation-test]
              [bbagent.provider-test]
+             [bbagent.replay-test]
              [bbagent.sqlite-store-test]
              [bbagent.sqlite-test]
              [bbagent.store-contract-test]
@@ -20,6 +21,7 @@
                         'bbagent.journal-test
                         'bbagent.orientation-test
                         'bbagent.provider-test
+                        'bbagent.replay-test
                         'bbagent.sqlite-store-test
                         'bbagent.sqlite-test
                         'bbagent.store-contract-test

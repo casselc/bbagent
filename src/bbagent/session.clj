@@ -60,6 +60,17 @@
       (append-bb4t! event-store session-id event)))
   (bb4t/subscribe! runtime #(append-bb4t! event-store session-id %)))
 
+(defn- replay-form
+  "One durable evaluation, as a checkpoint records it.
+
+  Deliberately only the source, the status it reached, and the request that
+  produced it.  The operation receipts recovery needs live on that request's
+  own :repl/result event and are found again through the store: a checkpoint
+  is rewritten in full on every evaluation, so a form's recorded results would
+  otherwise be copied once more into every checkpoint that follows it."
+  [request-id source status]
+  {:source source :expected-status status :request/id request-id})
+
 (defn checkpoint! [^AgentSession session reason]
   (append-session-event! session
                          {:event/type :session/checkpoint
@@ -73,11 +84,16 @@
    Creating a session never reads, imports, or converts state held by the
    other backend.
 
-   profile selects the capability surface and defaults to the A2 surface,
-   :agent/project-survey.  orientation defaults to :derived, whose claims are
-   generated from whatever that surface projects; :grounded, which A1.1
-   measured, states limits as prose and is false against any surface that can
-   enumerate.  Orientation adds no authority in either case."
+   profile selects the capability surface and defaults to
+   bb4t/default-profile, which is :agent/project-develop: the surface that can
+   change the project, because that is what A2 asks about.
+   :agent/project-survey remains selectable and read-only, and
+   :agent/project-read remains the frozen A0 surface.
+
+   orientation defaults to :derived, whose claims are generated from whatever
+   that surface projects; :grounded, which A1.1 measured, states limits as
+   prose and is false against any surface that can enumerate.  Orientation adds
+   no authority in either case."
   [{:keys [state-root project-root model-provider system-prompt session-id
            store-backend orientation profile]
     :or {session-id (coordinates/new-session-id) store-backend :sqlite
@@ -125,12 +141,49 @@
         (store/close-store! event-store)
         (throw failure)))))
 
+(defn- replay-step
+  "What recovery is entitled to do with one durable evaluation.
+
+  A result event carrying :repl/operations records every semantic operation
+  the form invoked and what each returned, so the form can be recomputed with
+  those results substituted and the world left alone.  A result event without
+  them was written before transcripts existed; there is nothing to substitute,
+  so the form runs against the world as it is now.  That is tolerable for an
+  observation and refused for a change, and either way it is reported rather
+  than presented as an exact reconstruction."
+  [form result]
+  (if (contains? result :repl/operations)
+    (assoc form :replay/mode :replay
+           :operations (vec (:repl/operations result)))
+    (assoc form :replay/mode :legacy)))
+
+(defn- checkpoint-plan
+  "How each form the checkpoint carries will be replayed."
+  [checkpoint result-event]
+  (mapv (fn [form]
+          (if-let [request-id (:request/id form)]
+            (if-let [result (result-event request-id)]
+              (replay-step form result)
+              (throw (errors/error
+                      :session-recovery-failure
+                      "A checkpointed form has no durable result to replay from"
+                      {:request/id request-id})))
+            ;; Recorded before a checkpointed form named its request, so there
+            ;; is no event on which to find receipts.
+            (assoc form :replay/mode :legacy)))
+        (vec (:repl/replay-forms checkpoint))))
+
 (defn- recovery-state
   "Rebuilds messages and replay forms from the event tail after the given
    checkpoint, seeded with the checkpoint's durable state.  request-event
-   is an indexed lookup (fn [request-id]) used when a tail :repl/result's
-   request predates the checkpoint."
-  [checkpoint tail request-event]
+   and result-event are indexed lookups (fn [request-id]): the first is used
+   when a tail :repl/result's request predates the checkpoint, the second to
+   find the operation receipts of a form the checkpoint only summarized.
+
+   Returns the rebuilt :messages, the :replay-forms the resumed session will
+   carry forward, and the :replay-plan recovery executes to rebuild the
+   Context, which is the same forms plus how each one may be replayed."
+  [checkpoint tail request-event result-event]
   (let [requests (into {} (keep (fn [event]
                                   (when (= :repl/request (:event/type event))
                                     [(:request/id event) event]))) tail)
@@ -153,7 +206,7 @@
                            "A REPL effect was interrupted before its result was durable"
                            {:request/ids (mapv :request/id unresolved)})))
     (reduce
-     (fn [{:keys [messages replay-forms] :as state} event]
+     (fn [{:keys [messages replay-forms replay-plan] :as state} event]
        (case (:event/type event)
          :user/message
          (assoc state :messages
@@ -192,6 +245,8 @@
                              :result/origin (:repl/origin event)})))
                action-id (:action/id event)
                result (:repl/result event)
+               form (replay-form (:request/id event) (:repl/source request)
+                                 (:status result))
                assistant-message
                (or (get action-messages action-id)
                    {:role :assistant
@@ -207,10 +262,9 @@
            ;; never something the model said, and synthesizing an assistant
            ;; message for it would put words in the model's mouth.
            (cond-> state
-             true (assoc :replay-forms
-                         (conj replay-forms
-                               {:source (:repl/source request)
-                                :expected-status (:status result)}))
+             true (assoc :replay-forms (conj replay-forms form)
+                         :replay-plan (conj replay-plan
+                                            (replay-step form event)))
              (not operator?)
              (assoc :messages
                     (conj messages
@@ -221,8 +275,63 @@
 
          state))
      {:messages (vec (:session/messages checkpoint))
-      :replay-forms (vec (:repl/replay-forms checkpoint))}
+      :replay-forms (vec (:repl/replay-forms checkpoint))
+      :replay-plan (checkpoint-plan checkpoint result-event)}
      tail)))
+
+(defn- replay-context!
+  "Rebuilds the Context's computational state from the session's own history.
+
+  Ordinary Clojure runs exactly as it first ran.  A semantic operation does
+  not: it returns what it returned then, so the reconstruction is of what the
+  session computed rather than of what the project happens to contain now.
+  A form recorded before receipts existed has nothing to substitute and is
+  reported rather than counted as reconstructed.
+
+  Fails closed on any divergence.  A replay that called a different operation,
+  called one with different arguments, or accounted for a different number of
+  them has not reproduced the session, and a partly reproduced Context is
+  worse than a refused one -- especially since a divergence can reach the same
+  status by a different route, which is why the transcript is checked before
+  the status is."
+  [runtime replay-plan]
+  (reduce
+   (fn [replay {:keys [source expected-status replay/mode operations]}]
+     (let [result (bb4t/evaluate runtime source
+                                 (if (= :replay mode)
+                                   {:transcript :replay :receipts operations}
+                                   {:transcript :legacy}))]
+       (when-let [reason (:transcript/error result)]
+         (throw (errors/error
+                 :session-recovery-failure
+                 (or (:transcript/message result)
+                     "A replayed form diverged from its recorded operations")
+                 {:source source
+                  :transcript/error reason
+                  :expected-status expected-status})))
+       (when-not (= expected-status (:status result))
+         (throw (errors/error :session-recovery-failure
+                              "A checkpoint form replay changed status"
+                              {:source source
+                               :expected-status expected-status
+                               :actual-status (:status result)})))
+       (cond-> (update replay :forms inc)
+         (= :replay mode) (update :reconstructed inc)
+         (not= :replay mode) (update :legacy inc)
+         true (update :reobserved into (:observations result)))))
+   {:forms 0 :reconstructed 0 :legacy 0 :reobserved #{}}
+   replay-plan))
+
+(defn- replay-summary
+  "What the resume event says about how faithful the reconstruction was.
+
+   :exact? is the claim that matters: true only when every form was rebuilt
+   from its own receipts, so nothing about the current project was consulted
+   to produce the state the session resumed with."
+  [replay]
+  (-> replay
+      (update :reobserved (comp vec sort))
+      (assoc :exact? (empty? (:reobserved replay)))))
 
 (defn resume!
   "Resumes session-id from the selected backend.  store-backend defaults to
@@ -272,17 +381,11 @@
                                                  :context :profile])
                                 :agent/project-read)
             runtime (bb4t/create (:project/root project) resumed-profile)
-            {:keys [messages replay-forms]}
+            {:keys [messages replay-forms replay-plan]}
             (recovery-state checkpoint tail
-                            #(store/request-event event-store session-id %))]
-        (doseq [{:keys [source expected-status]} replay-forms]
-          (let [result (bb4t/evaluate runtime source)]
-            (when-not (= expected-status (:status result))
-              (throw (errors/error :session-recovery-failure
-                                   "A checkpoint form replay changed status"
-                                   {:source source
-                                    :expected-status expected-status
-                                    :actual-status (:status result)})))))
+                            #(store/request-event event-store session-id %)
+                            #(store/result-event event-store session-id %))
+            replay (replay-context! runtime replay-plan)]
         (let [;; Inherited from the start coordinate rather than defaulted,
               ;; because resuming without repeating the flag used to return
               ;; the model to the unoriented prompt in the middle of a
@@ -304,6 +407,7 @@
                  {:event/type :session/resumed
                   :session/coordinate coordinate
                   :resume/from-event (:event/id checkpoint)
+                  :session/replay (replay-summary replay)
                   :world/changed?
                   (not= (select-keys project
                                      [:project/revision :project/dirty?])
@@ -388,14 +492,19 @@
                             :request/id request-id
                             :action/id action-id
                             :repl/source source})
-    (let [result (bb4t/evaluate (:bb4t session) source)]
+    (let [outcome (bb4t/evaluate (:bb4t session) source {:transcript :record})
+          ;; The receipts are journalled beside the result rather than inside
+          ;; it: they are how recovery rebuilds this form, not part of what
+          ;; the model asked for or is shown.
+          result (dissoc outcome :operations)]
       (append-session-event! session
                              {:event/type :repl/result
                               :request/id request-id
                               :action/id action-id
-                              :repl/result result})
+                              :repl/result result
+                              :repl/operations (:operations outcome)})
       (swap! (:replay-forms session) conj
-             {:source source :expected-status (:status result)})
+             (replay-form request-id source (:status result)))
       (swap! (:messages session) conj
              {:role :tool
               :action/id action-id
@@ -427,14 +536,16 @@
                             :request/id request-id
                             :repl/origin :operator
                             :repl/source source})
-    (let [result (bb4t/evaluate (:bb4t session) source)]
+    (let [outcome (bb4t/evaluate (:bb4t session) source {:transcript :record})
+          result (dissoc outcome :operations)]
       (append-session-event! session
                              {:event/type :repl/result
                               :request/id request-id
                               :repl/origin :operator
-                              :repl/result result})
+                              :repl/result result
+                              :repl/operations (:operations outcome)})
       (swap! (:replay-forms session) conj
-             {:source source :expected-status (:status result)})
+             (replay-form request-id source (:status result)))
       (checkpoint! session :operator-repl-result)
       result)))
 

@@ -31,7 +31,9 @@
    or into these values."
   [:bb4t/error :operation/id :capability/id :error/type
    :path :limit :bytes :budget
-   :bbagent/conflict :conflict/expected :conflict/observed])
+   :bbagent/conflict :conflict/expected :conflict/observed
+   :transcript/error :transcript/index :transcript/count
+   :transcript/expected :transcript/actual])
 
 (defn- bb4t-data
   "The kernel's own failure data, which SCI wraps.
@@ -48,6 +50,17 @@
       (or (nil? current) (> depth 8)) nil
       (contains? (ex-data current) :bb4t/error) (ex-data current)
       :else (recur (ex-cause current) (inc depth)))))
+
+(defn transcript-error
+  "The transcript refusal a bb4t failure carries, or nil.
+
+   Recovery has to tell a replay that diverged from a form that failed the
+   same way it always did.  Both arrive as evaluation failures; only one of
+   them means the reconstruction cannot be trusted."
+  [failure]
+  (let [data (bb4t-data failure)]
+    (when (= :transcript (:bb4t/error data))
+      (:transcript/error data))))
 
 (defn normalize-bb4t [failure]
   (let [data (or (bb4t-data failure) (ex-data failure))
