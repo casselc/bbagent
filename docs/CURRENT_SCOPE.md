@@ -62,6 +62,15 @@ Three defects that only appeared from using it, all fixed; see
   resume. The gate found a defect the suite could not: the REPL pane rendered
   only the result status, never the value.
 
+### Blocking
+
+**A session that edits a file cannot be resumed.** Replay re-executes the edit
+against a world it already changed; version anchoring correctly refuses it, and
+recovery correctly refuses the session. Both halves are right and the
+combination is unusable. The fix is to reconstruct an effectful form's recorded
+result rather than re-execute it. Pinned by test; see `docs/A2_FINDINGS.md`
+section 10. **A2 cannot be accepted until this is closed.**
+
 ### Still open in A2
 
 `project/search`, `project/edit` with version-anchored mutation, and

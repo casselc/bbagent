@@ -1,7 +1,9 @@
 # A2 Findings (in progress): Useful Semantic Project World
 
-Status: **A2 active.** `project/list`, `project/search`, `project/stat` and
-`project/edit` are delivered and dogfooded. `project/test` is not started.
+Status: **A2 active, and blocked on one defect.** `project/list`,
+`project/search`, `project/stat` and `project/edit` are delivered, dogfooded,
+and proved natively. A session that edits a file cannot be resumed (section 10);
+A2 cannot be accepted until that is fixed.
 
 ## 1. The question
 
@@ -418,10 +420,85 @@ The one error is the same wrong guess both times. What changed is that the
 refusal now tells the model what shape it should have used, instead of only that
 something failed.
 
-## 10. Next
+## 10. A blocking defect: a session that edits cannot be resumed
 
-`project/test`, where the question is what counts as verification rather than
-what counts as running a command.
+Found by the PTY proof, and it is the most important result in this milestone.
+
+Resuming a session that had edited a file fails:
+
+```text
+A checkpoint form replay changed status
+{:source "(project/edit {:path \"native-proof.txt\" :base :absent :content \"one\"})"
+ :expected-status :ok
+ :actual-status :error}
+```
+
+Computational replay rebuilds SCI state by **re-running the session's forms**,
+which assumes they can be run again. `project/edit` cannot: version anchoring
+makes re-application a conflict *by design*, so a form recorded `:ok` replays
+`:error` and recovery refuses the session.
+
+Both halves are behaving correctly and the combination is unusable. Failing
+closed is right — it is not silent corruption and not a double write — but a
+durable session that changed a file is unresumable, and durability is the
+product. **A2 cannot be accepted with this open.**
+
+The fix is a change to recovery semantics rather than to either capability: an
+effectful form's recorded *result* should be reconstructed rather than the form
+re-executed. The journal already holds the result. That is deliberately not
+attempted here at the end of a long change; it needs its own step and its own
+evidence.
+
+Pinned by `a-session-that-edited-cannot-be-resumed-test` so it cannot regress
+silently or be forgotten while it is open.
+
+## 11. Native and PTY evidence for the write surface
+
+Thirty gates pass against an image built at bb4t `f3547d02` and bbagent
+`c7afbb6e`. In the image, `:project-edit-anchored :ok` and
+`:project-edit-conflict-refused :ok` sit alongside all 35 authority negatives
+with `:projected-class-count 0`.
+
+### The proof was measuring the wrong thing
+
+Getting there took four failed runs, and every failure was in the harness rather
+than the product. Recorded because the harness is evidence too:
+
+1. **Gates asserted `":ok"` appeared on screen.** Once the REPL pane rendered
+   values instead of statuses that string stopped appearing — and worse, the
+   pane redraws several previous entries per keystroke, so a gate looking for
+   `":ok"` could always have been satisfied by an older line. It would have
+   passed whether or not the thing it named worked.
+2. **A real newline inside a Python byte literal.** `:content "…\n"` sent an
+   Enter keypress mid-form, submitting a half-typed expression and corrupting
+   everything after it. The product then behaved *correctly* in a way that
+   looked like a bug: with the first edit broken, the base was still current, so
+   the "clobbered" edit legitimately applied.
+3. **A reused fixture directory.** A previous run's edits had left `README.md`
+   containing `clobbered`, so `project/search "fixture"` correctly found nothing.
+4. **Screen-scraping as the instrument for semantic claims.** charm redraws
+   incrementally: once a pane is full, a value line is rewritten in place rather
+   than emitted contiguously, so markers plainly visible to a person never
+   appear in the byte stream.
+
+The fourth is the one that changed the design. **Semantic gates now read the
+durable journal; the screen keeps interface gates.** The journal is what the
+product is built on and is authoritative about what the bounded context
+computed; a terminal can attest that the interface renders, accepts input, and
+exits, and should not be asked for more. That split is why the proof now states
+`project/edit conflict: file changed since it was read` as a fact rather than as
+a string someone hoped to see.
+
+I also fixed a pane-overflow guard while chasing this, then checked whether the
+test I wrote for it failed against the old code. It did not — the pane never
+overflowed. The guard is still worth keeping, but it explained nothing, and
+saying so is the difference between a fix and a coincidence.
+
+## 12. Next
+
+**Effectful replay first** — section 10. `project/test` after that, where the
+question is what counts as verification rather than what counts as running a
+command.
 
 Two smaller items the dogfood surfaced and did not fix: a broad search returns
 matches from `artifacts/` and `docs/` that crowd out source, which is an

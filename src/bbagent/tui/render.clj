@@ -255,14 +255,20 @@
             ;; value on one line meant the value was always the half that got
             ;; truncated away -- which is the half the operator ran the form
             ;; for.
-            repl-pane (mapcat (fn [entry]
-                                [(fit (str "repl> " (:source entry)) right-width)
-                                 (fit (str "  => "
-                                           (vm/repl-result-summary
-                                            (:result entry)))
-                                      right-width)])
-                              (take-last (max 1 (quot bottom-height 2))
-                                         (:repl/log state)))
+            ;; Trimmed to the pane after expansion, not before. Two lines per
+            ;; entry cannot be divided into an odd or a one-row pane without
+            ;; overflowing it, and an overflowing pane pushes every later line
+            ;; off the frame.
+            repl-pane (take-last
+                       bottom-height
+                       (mapcat (fn [entry]
+                                 [(fit (str "repl> " (:source entry)) right-width)
+                                  (fit (str "  => "
+                                            (vm/repl-result-summary
+                                             (:result entry)))
+                                       right-width)])
+                               (take-last (inc (quot bottom-height 2))
+                                          (:repl/log state))))
             left (concat [(pane-title "Context" (= :context (:focus state)))]
                          context-pane
                          (repeat (max 0 (- top-height (count context-pane))) "")

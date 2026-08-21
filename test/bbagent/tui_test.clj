@@ -727,3 +727,63 @@
                                         :value/data (vec (range 500))}}})]
         (is (<= (count line) 250))
         (is (str/ends-with? line "..."))))))
+
+(deftest repl-pane-never-overflows-its-height-test
+  (testing "the frame keeps its shape at any terminal size"
+    ;; Two lines per entry cannot divide an odd or one-row pane evenly. An
+    ;; overflowing pane pushed every later line off the frame, which the PTY
+    ;; proof saw as the process failing to exit cleanly rather than as a
+    ;; rendering fault.
+    (let [entries (mapv (fn [n]
+                          {:source (str "(form " n ")")
+                           :result {:status :ok
+                                    :evaluation {:value {:value/kind :inert-data
+                                                         :value/data n}}}})
+                        (range 20))]
+      ;; render clamps to a floor of 12 rows, so the frame is measured against
+      ;; the height it actually chose.
+      (doseq [rows (range 12 41)]
+        (let [base (state/initial {:cols 80 :rows rows})
+              frame (render/render (assoc base :repl/log entries))
+              lines (str/split-lines frame)]
+          (is (<= (count lines) rows)
+              (str "frame must fit " rows " rows, produced " (count lines))))))))
+
+(deftest a-session-that-edited-cannot-be-resumed-test
+  (testing "an effectful form replayed on resume fails closed"
+    ;; A2's blocking defect, pinned so it cannot regress silently while it is
+    ;; open. Computational replay rebuilds SCI state by re-running the
+    ;; session's forms, which assumes they can be run again. project/edit
+    ;; cannot: version anchoring makes re-application a conflict by design, so
+    ;; a form recorded :ok replays :error and recovery refuses the session.
+    ;;
+    ;; Failing closed is the right behaviour for the wrong situation. It is
+    ;; not silent corruption and not a double write, but it does mean a
+    ;; durable session that changed a file is unresumable, which the product
+    ;; cannot ship. The fix is to reconstruct an effectful form's recorded
+    ;; result rather than re-execute it; see docs/A2_FINDINGS.md.
+    (let [state-root (temp-root "bbagent-edit-resume")
+          project-root (project)
+          session-id "edit-then-resume"
+          s (session/start! {:state-root state-root
+                             :project-root project-root
+                             :model-provider (provider/fake [])
+                             :system-prompt "base"
+                             :session-id session-id
+                             :store-backend :sqlite})]
+      (is (= :ok (:status (session/operator-evaluate!
+                           s (str "(project/edit {:path \"created.txt\" "
+                                  ":base :absent :content \"one\"})")))))
+      (session/close! s :test-end)
+      (let [failure (try
+                      (session/resume! {:state-root state-root
+                                        :session-id session-id
+                                        :model-provider (provider/fake [])
+                                        :system-prompt "base"
+                                        :store-backend :sqlite})
+                      nil
+                      (catch clojure.lang.ExceptionInfo e e))]
+        (is (some? failure) "resume must not silently succeed")
+        (is (= :session-recovery-failure (:bbagent/error (ex-data failure))))
+        (is (= :ok (get-in (ex-data failure) [:error/data :expected-status])))
+        (is (= :error (get-in (ex-data failure) [:error/data :actual-status])))))))
