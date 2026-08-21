@@ -281,6 +281,22 @@
          ;; A0 shipped with.
          :project-search (app-runtime/evaluate app
                                                "(project/search \"fixture\")")
+         ;; The write path, proved in the image: an edit anchored to a stat
+         ;; digest applies, and the same stale base is then refused.
+         :project-stat (app-runtime/evaluate app "(project/stat \"README.md\")")
+         :project-edit-anchored
+         (app-runtime/evaluate
+          app
+          (str "(let [c (project/stat \"README.md\")] "
+               "(project/edit {:path \"README.md\" :base {:digest (:digest c)} "
+               ":content (str (project/read \"README.md\") \"edited\n\")}))"))
+         :project-edit-conflict-refused
+         (let [stale (app-runtime/evaluate
+                      app
+                      (str "(project/edit {:path \"README.md\" "
+                           ":base {:digest \"sha256:00\"} :content \"clobber\"})"))]
+           ;; A refusal is the pass here, so invert it into the positive map.
+           {:status (if (= :error (:status stale)) :ok :error)})
          :composition (app-runtime/evaluate
                        app
                        (str "(do (defn names [es] (mapv :name es)) "

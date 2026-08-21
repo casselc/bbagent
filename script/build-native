@@ -248,9 +248,14 @@ fi
 # above still have to hold alongside them.
 for a2 in ':project-list :ok' \
           ':project-search :ok' \
+          ':project-stat :ok' \
+          ':project-edit-anchored :ok' \
+          ':project-edit-conflict-refused :ok' \
           ':composition :ok' \
           ':project/list' \
-          ':project/search'
+          ':project/search' \
+          ':project/stat' \
+          ':project/edit'
 do
   if ! grep -Fq "$a2" "$BUILD_ROOT/s0b-authority.edn"
   then

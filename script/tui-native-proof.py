@@ -105,7 +105,10 @@ def run(dist, state_root, project_root):
     gates["capability_pane_a2"] = (
         "project/list" in first and "project/search" in first
     )
-    gates["profile_from_bb4t"] = "agent/project-survey" in first
+    gates["capability_pane_write"] = (
+        "project/stat" in first and "project/edit" in first
+    )
+    gates["profile_from_bb4t"] = "agent/project-develop" in first
     gates["events_pane"] = "session/started" in first or "Recent Events" in first
 
     mark = len(s.out)
@@ -158,6 +161,31 @@ def run(dist, state_root, project_root):
         ":ok" in lazy and ":error" not in lazy and "README" in lazy
     )
 
+    # The write path at a real terminal: an anchored edit applies, and the now
+    # stale base is refused rather than clobbering what replaced it.
+    mark = len(s.out)
+    s.send(b'(def before (project/stat "README.md"))\r', settle=5.0)
+    gates["native_stat"] = ":ok" in plain(bytes(s.out[mark:]))
+
+    mark = len(s.out)
+    s.send(b'(project/edit {:path "README.md" :base {:digest (:digest before)} '
+           b':content "rewritten by the native proof\n"})\r', settle=6.0)
+    applied = plain(bytes(s.out[mark:]))
+    gates["native_edit_applies"] = ":ok" in applied and ":error" not in applied
+
+    mark = len(s.out)
+    s.send(b'(project/edit {:path "README.md" :base {:digest (:digest before)} '
+           b':content "clobbered"})\r', settle=6.0)
+    refused = plain(bytes(s.out[mark:]))
+    gates["native_edit_conflict_refused"] = "conflict" in refused
+
+    mark = len(s.out)
+    s.send(b'(project/read "README.md")\r', settle=5.0)
+    kept = plain(bytes(s.out[mark:]))
+    gates["native_conflict_kept_content"] = (
+        "rewritten by the native proof" in kept and "clobbered" not in kept
+    )
+
     # Operator and model share one bounded Context, so an operator definition
     # must be journaled and reconstructed on resume.  Define it here and read
     # it back in the second process below.
@@ -194,6 +222,7 @@ def run(dist, state_root, project_root):
         gates["resume_capabilities"] = "project/read" in resumed
         gates["resume_capabilities_a2"] = (
             "project/list" in resumed and "project/search" in resumed
+            and "project/edit" in resumed
         )
         # Prove the operator definition survived into the rebuilt Context.
         s2.send(b"\x14", settle=1.5)  # Ctrl-T: operator repl mode
