@@ -7,7 +7,7 @@
  {:bb4t/commit "f3547d0270fb7b805130bbe61f60ef4c1f6365ad"
   :bbagent/commit "1149e0d573b5bd06357958af555fca3e5c4f4de1"
   :builder "script/build-native"
-  :note "built at the commit under review, so the image matches the source a reviewer reads"}
+  :note "built at 1149e0d5; commits after it change only docs/ and artifacts/, so the image matches the runtime source a reviewer reads"}
 
  :image
  {:path "dist/bbagent"

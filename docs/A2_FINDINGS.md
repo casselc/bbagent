@@ -537,8 +537,8 @@ silently or be forgotten while it is open.
 ## 11. Native and PTY evidence for the write surface
 
 Thirty gates pass against an image built at bb4t `f3547d02` and bbagent
-`1149e0d5` — the commit under review, rebuilt so the image matches the source a
-reviewer reads rather than trailing it by one change. In the image, `:project-edit-anchored :ok` and
+`1149e0d5`, rebuilt so the image matches the runtime source rather than trailing
+it by one change. Commits after `1149e0d5` touch only `docs/` and `artifacts/`. In the image, `:project-edit-anchored :ok` and
 `:project-edit-conflict-refused :ok` sit alongside all 35 authority negatives
 with `:projected-class-count 0`.
 
