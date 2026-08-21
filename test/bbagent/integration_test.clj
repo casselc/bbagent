@@ -19,13 +19,13 @@
   (let [project-root (fixture-project)
         app (app-runtime/create project-root)
         description (:context/description app)]
-    (is (= :agent/project-survey
+    (is (= :agent/project-develop
            (get-in description [:context/spec :profile]))
-        "A2 sessions get the surveying surface by default")
+        "A2 sessions get the writing surface by default")
     (is (= (app-runtime/capabilities app-runtime/default-profile)
            (get-in description [:context/spec :requested-capabilities])))
     (is (= #{:data/json-read :data/json-write :project/read :project/list
-             :project/search}
+             :project/search :project/stat :project/edit}
            (get-in description [:context/effective :context/grants])))
     (is (= "bounded project"
            (get-in (app-runtime/evaluate app "(project/read \"README.md\")")
@@ -352,3 +352,113 @@
       (testing "it composes with a capability result"
         (is (= 2 (data (str "(count (str/split-lines "
                             "(project/read \"README.md\")))"))))))))
+
+;; ---------------------------------------------------------------------------
+;; project/stat and project/edit: version-anchored mutation
+;; ---------------------------------------------------------------------------
+
+(defn- edit-project []
+  (let [^Path root (Files/createTempDirectory
+                    "bbagent-edit"
+                    (make-array java.nio.file.attribute.FileAttribute 0))]
+    (Files/writeString (.resolve root "a.txt") "original\n"
+                       (make-array java.nio.file.OpenOption 0))
+    (Files/createDirectories (.resolve root "sub")
+                             (make-array java.nio.file.attribute.FileAttribute 0))
+    (Files/createSymbolicLink (.resolve root "escape") (.resolve root "..")
+                              (make-array java.nio.file.attribute.FileAttribute 0))
+    (str root)))
+
+(deftest project-stat-reports-a-usable-coordinate-test
+  (let [app (app-runtime/create (edit-project))
+        stat (found app "(project/stat \"a.txt\")")]
+    (is (= "a.txt" (:path stat)))
+    (is (= :file (:kind stat)))
+    (is (= 9 (:bytes stat)))
+    (is (str/starts-with? (:digest stat) "sha256:"))
+    (testing "an absent file is reported, not an error"
+      (is (= {:path "nope.txt" :kind :absent}
+             (found app "(project/stat \"nope.txt\")"))))
+    (testing "a directory reports its kind and carries no digest"
+      (let [d (found app "(project/stat \"sub\")")]
+        (is (= :directory (:kind d)))
+        (is (nil? (:digest d)))))))
+
+(deftest project-edit-requires-a-base-coordinate-test
+  (testing "an edit without a base is refused rather than overwriting blindly"
+    ;; The human, an editor, a formatter and a Git checkout all write to the
+    ;; same world. An edit states what it believed and is refused when that is
+    ;; no longer true.
+    (let [app (app-runtime/create (edit-project))]
+      (is (denied? app "(project/edit {:path \"a.txt\" :content \"blind\"})"))
+      (is (denied? app "(project/edit {:path \"a.txt\" :base nil :content \"x\"})"))
+      (is (denied? app "(project/edit {:path \"a.txt\" :base {} :content \"x\"})"))
+      (is (= "original\n"
+             (get-in (app-runtime/evaluate app "(project/read \"a.txt\")")
+                     [:evaluation :value :value/data]))
+          "the file must be untouched by every refusal above"))))
+
+(deftest project-edit-applies-and-conflicts-test
+  (let [app (app-runtime/create (edit-project))
+        data #(get-in (app-runtime/evaluate app %) [:evaluation :value :value/data])]
+    (app-runtime/evaluate app "(def c (project/stat \"a.txt\"))")
+    (testing "an edit anchored to the current version applies"
+      (let [result (data (str "(project/edit {:path \"a.txt\" "
+                              ":base {:digest (:digest c)} "
+                              ":content \"rewritten\n\"})"))]
+        (is (= "a.txt" (:path result)))
+        (is (= 10 (:bytes result)))
+        (is (str/starts-with? (:digest result) "sha256:")))
+      (is (= "rewritten\n" (data "(project/read \"a.txt\")"))))
+    (testing "the same base is now stale, and the second write is refused"
+      (is (denied? app (str "(project/edit {:path \"a.txt\" "
+                            ":base {:digest (:digest c)} "
+                            ":content \"again\n\"})")))
+      (is (= "rewritten\n" (data "(project/read \"a.txt\")"))
+          "a conflict must leave the file exactly as it was"))
+    (testing "the digest an edit returns anchors the next edit"
+      (app-runtime/evaluate app "(def c2 (project/stat \"a.txt\"))")
+      (is (some? (data (str "(project/edit {:path \"a.txt\" "
+                            ":base {:digest (:digest c2)} "
+                            ":content \"third\n\"})"))))
+      (is (= "third\n" (data "(project/read \"a.txt\")"))))))
+
+(deftest project-edit-creates-only-with-absent-base-test
+  (let [app (app-runtime/create (edit-project))
+        data #(get-in (app-runtime/evaluate app %) [:evaluation :value :value/data])]
+    (testing ":absent creates a file that does not exist"
+      (is (some? (data "(project/edit {:path \"b.txt\" :base :absent :content \"new\"})")))
+      (is (= "new" (data "(project/read \"b.txt\")"))))
+    (testing ":absent on an existing file is a conflict, not a truncation"
+      (is (denied? app "(project/edit {:path \"b.txt\" :base :absent :content \"twice\"})"))
+      (is (= "new" (data "(project/read \"b.txt\")"))))
+    (testing "a digest base on an absent file is a conflict"
+      (is (denied? app (str "(project/edit {:path \"gone.txt\" "
+                            ":base {:digest \"sha256:00\"} :content \"x\"})"))))
+    (testing "it does not create directories"
+      (is (denied? app "(project/edit {:path \"new/deep.txt\" :base :absent :content \"x\"})")))))
+
+(deftest project-edit-cannot-leave-the-authorized-root-test
+  (let [app (app-runtime/create (edit-project))]
+    (is (denied? app "(project/edit {:path \"../escaped\" :base :absent :content \"x\"})"))
+    (is (denied? app "(project/edit {:path \"/tmp/escaped\" :base :absent :content \"x\"})"))
+    (is (denied? app "(project/edit {:path \"sub/../../escaped\" :base :absent :content \"x\"})"))
+    (is (denied? app "(project/edit {:path \"escape/x\" :base :absent :content \"x\"})"))
+    (is (denied? app "(project/edit {:path \".\" :base :absent :content \"x\"})"))
+    (is (denied? app "(project/edit {:path \"sub\" :base :absent :content \"x\"})")
+        "a directory is not a regular file")
+    (testing "malformed input"
+      (is (denied? app "(project/edit)"))
+      (is (denied? app "(project/edit \"a.txt\")"))
+      (is (denied? app "(project/edit {:path \"a.txt\" :base :absent :content 7})")))))
+
+(deftest write-authority-is-a-separate-profile-test
+  (testing "the surveying profile can read the world but not change it"
+    (let [app (app-runtime/create (edit-project) :agent/project-survey)]
+      (is (some? (get-in (app-runtime/evaluate app "(project/stat \"a.txt\")")
+                         [:evaluation :value :value/data])))
+      (is (denied? app "(project/edit {:path \"a.txt\" :base :absent :content \"x\"})"))))
+  (testing "the frozen A0 profile has neither"
+    (let [app (app-runtime/create (edit-project) :agent/project-read)]
+      (is (denied? app "(project/stat \"a.txt\")"))
+      (is (denied? app "(project/edit {:path \"a.txt\" :base :absent :content \"x\"})")))))

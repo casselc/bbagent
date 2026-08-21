@@ -26,16 +26,39 @@
    {:context-spec/version 1
     :profile :agent/project-survey
     :requested-capabilities #{:data/json-read :data/json-write
-                              :project/read :project/list :project/search}
+                              :project/read :project/list :project/search
+                              :project/stat}
     :authorized-capabilities #{:data/json-read :data/json-write
-                               :project/read :project/list :project/search}
+                               :project/read :project/list :project/search
+                               :project/stat}
     :resource-bindings {:project :project/root}
     :limits {:project/read-max-bytes 1048576
              :project/list-max-entries 4096
              :project/search-max-results 200
-             :project/search-max-files 20000}}})
+             :project/search-max-files 20000}}
 
-(def default-profile :agent/project-survey)
+   :agent/project-develop
+   {:context-spec/version 1
+    :profile :agent/project-develop
+    :requested-capabilities #{:data/json-read :data/json-write
+                              :project/read :project/list :project/search
+                              :project/stat :project/edit}
+    :authorized-capabilities #{:data/json-read :data/json-write
+                               :project/read :project/list :project/search
+                               :project/stat :project/edit}
+    :resource-bindings {:project :project/root}
+    :limits {:project/read-max-bytes 1048576
+             :project/list-max-entries 4096
+             :project/search-max-results 200
+             :project/search-max-files 20000
+             :project/write-max-bytes 1048576}}})
+
+(def default-profile
+  "A2 asks whether the model can do real project work, which means changing
+   the project. Sessions default to the writing profile; :agent/project-survey
+   remains selectable and read-only, and :agent/project-read remains the frozen
+   A0 surface."
+  :agent/project-develop)
 
 (defn context-spec
   "The spec for a profile.  An unknown profile fails closed rather than

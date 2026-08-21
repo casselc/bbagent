@@ -50,12 +50,15 @@
       (is (str/includes? preamble
                          "Read a UTF-8 file relative to the authorized project root")))
     (testing "the profile comes from the effective context"
-      (is (str/includes? preamble ":agent/project-survey")))
+      (is (str/includes? preamble ":agent/project-develop")))
     (testing "it names the discovery surface that already exists"
       (is (str/includes? preamble "(apropos \"\")"))
       (is (str/includes? preamble "(doc ")))
     (testing "it stays short enough to prepend to every turn"
-      (is (< (count preamble) 1200)))))
+      ;; Bounded by construction rather than by this number: at most twelve
+      ;; operations, each docstring capped. The number tracks that bound as
+      ;; the surface grows and is not itself the guarantee.
+      (is (< (count preamble) 2500)))))
 
 (deftest generated-preamble-cannot-invent-authority-test
   (testing "a context projecting nothing produces no preamble"

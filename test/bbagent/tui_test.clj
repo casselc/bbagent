@@ -101,12 +101,12 @@
   (testing "the projection works on the actual bounded context"
     (let [runtime (bb4t/create (project))
           projected (vm/capabilities (:context/description runtime))]
-      (is (= :agent/project-survey (:profile projected)))
-      (is (= [:data/json-read :data/json-write :project/list :project/read
-              :project/search]
+      (is (= :agent/project-develop (:profile projected)))
+      (is (= [:data/json-read :data/json-write :project/edit :project/list
+              :project/read :project/search :project/stat]
              (:effective-grants projected)))
-      (is (= ["data.json/read" "data.json/write" "project/list" "project/read"
-              "project/search"]
+      (is (= ["data.json/read" "data.json/write" "project/edit" "project/list"
+              "project/read" "project/search" "project/stat"]
              (:vars projected)))
       (is (zero? (:projected-class-count projected)))
       (is (zero? (:supplied-import-count projected))))))
