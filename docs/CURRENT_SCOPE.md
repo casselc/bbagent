@@ -1,7 +1,12 @@
 # Current Scope: A1.1
 
 **Milestone status:** A0 PASS, S0a PASS, S0b PASS, A1 PASS (accepted with
-follow-ups), A1.1 ACTIVE.
+follow-ups), A1.1 PASS pending review.
+
+A1.1 findings are in `docs/A1_1_FINDINGS.md`. Orientation is implemented and
+measured; the default is still `:none`, and changing it is a separate reviewed
+step. The recommendation is to default to `:grounded` and then begin A2 with
+`project/list`. Do not do either without review.
 
 A1 is complete and frozen at `bbagent-a1`. Its findings are in
 `docs/A1_FINDINGS.md`.
@@ -31,7 +36,12 @@ baseline              the current system prompt
 minimal orientation   one instruction naming apropos and doc
 generated orientation a short preamble derived from the Context description
                       and RuntimeCatalog, plus the apropos/doc instruction
+grounded orientation  generated, plus a constraint on what may be asserted
 ```
+
+The fourth variant was not planned. It was added after the first three showed
+that listing operations fixes discovery without preventing unsupported claims;
+see the findings.
 
 The preamble must be **another projection of the same authority description**
 that already feeds the TUI capability pane and `apropos`/`doc`, not parallel

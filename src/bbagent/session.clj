@@ -2,6 +2,7 @@
   (:require [bbagent.bb4t :as bb4t]
             [bbagent.coordinates :as coordinates]
             [bbagent.errors :as errors]
+            [bbagent.orientation :as orientation]
             [bbagent.provider :as provider]
             [bbagent.storage :as storage]
             [bbagent.store :as store])
@@ -25,7 +26,8 @@
      :reasoning-effort reasoning-effort
      :allow-insecure-http allow-insecure-http}))
 
-(defn- envelope [session-id run-id project model-provider system-prompt runtime]
+(defn- envelope
+  [session-id run-id project model-provider system-prompt runtime orientation-mode]
   (let [{:keys [provider endpoint model reasoning-effort allow-insecure-http]}
         (provider-coordinate model-provider)]
     (coordinates/session-envelope
@@ -39,6 +41,9 @@
       :model model
       :reasoning-effort reasoning-effort
       :allow-insecure-http allow-insecure-http
+      :orientation orientation-mode
+      ;; The digest is taken over the composed prompt, so it identifies what
+      ;; the model actually received rather than the base prompt alone.
       :system-prompt system-prompt})))
 
 (defn- append-bb4t! [event-store session-id event]
@@ -68,16 +73,23 @@
    Creating a session never reads, imports, or converts state held by the
    other backend."
   [{:keys [state-root project-root model-provider system-prompt session-id
-           store-backend]
-    :or {session-id (coordinates/new-session-id) store-backend :sqlite}}]
+           store-backend orientation]
+    :or {session-id (coordinates/new-session-id) store-backend :sqlite
+         orientation :none}}]
   (let [run-id (coordinates/new-run-id)
         project (coordinates/project-description project-root)
         event-store (storage/open! state-root store-backend)
         unsubscribe (atom nil)]
     (try
       (let [runtime (bb4t/create (:project/root project))
+            ;; Composed after the Context exists, because a generated preamble
+            ;; is a projection of that Context's own description.
+            composed-prompt (orientation/compose
+                             system-prompt orientation
+                             (:context/description runtime))
             coordinate (envelope session-id run-id project model-provider
-                                 system-prompt runtime)
+                                 composed-prompt runtime
+                                 (orientation/mode orientation))
             _ (store/append-event!
                event-store session-id
                {:event/type :session/started
@@ -88,7 +100,7 @@
                                                      session-id)
              _ (reset! unsubscribe subscription)
              session (->AgentSession session-id run-id project model-provider
-                                     system-prompt event-store runtime
+                                     composed-prompt event-store runtime
                                      coordinate (atom []) (atom []) subscription
                                      (atom false))]
         (checkpoint! session :session-start)
@@ -204,8 +216,9 @@
    :file.  Resuming with the wrong backend fails as
    :session-recovery-failure; it never reinterprets or migrates the other
    backend's durable state."
-  [{:keys [state-root session-id model-provider system-prompt store-backend]
-    :or {store-backend :sqlite}}]
+  [{:keys [state-root session-id model-provider system-prompt store-backend
+           orientation]
+    :or {store-backend :sqlite orientation :none}}]
   (let [event-store (storage/open! state-root store-backend)]
     (try
       (let [_ (store/validate-session! event-store session-id)
@@ -242,9 +255,13 @@
                                    {:source source
                                     :expected-status expected-status
                                     :actual-status (:status result)})))))
-        (let [coordinate (envelope session-id run-id
+        (let [composed-prompt (orientation/compose
+                               system-prompt orientation
+                               (:context/description runtime))
+              coordinate (envelope session-id run-id
                                    current-project
-                                   model-provider system-prompt runtime)
+                                   model-provider composed-prompt runtime
+                                   (orientation/mode orientation))
               _ (store/append-event!
                  event-store session-id
                  {:event/type :session/resumed
@@ -262,7 +279,7 @@
               unsubscribe (subscribe-after-snapshot! runtime event-store
                                                      session-id)]
           (->AgentSession session-id run-id current-project model-provider
-                          system-prompt event-store runtime coordinate
+                          composed-prompt event-store runtime coordinate
                           (atom messages)
                           (atom replay-forms) unsubscribe (atom false))))
       (catch clojure.lang.ExceptionInfo failure

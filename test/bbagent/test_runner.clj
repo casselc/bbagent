@@ -3,6 +3,7 @@
             [bbagent.coordinates-test]
             [bbagent.integration-test]
             [bbagent.journal-test]
+             [bbagent.orientation-test]
              [bbagent.provider-test]
              [bbagent.sqlite-store-test]
              [bbagent.sqlite-test]
@@ -17,6 +18,7 @@
                         'bbagent.coordinates-test
                         'bbagent.integration-test
                         'bbagent.journal-test
+                        'bbagent.orientation-test
                         'bbagent.provider-test
                         'bbagent.sqlite-store-test
                         'bbagent.sqlite-test

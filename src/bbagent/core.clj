@@ -1,5 +1,6 @@
 (ns bbagent.core
   (:require [bbagent.agent :as agent]
+            [bbagent.orientation :as orientation]
             [bbagent.provider :as provider]
             [bbagent.s0b-smoke :as s0b-smoke]
             [bbagent.session :as session]
@@ -99,12 +100,14 @@
                               :model-provider (model-provider
                                                options (:provider/config start))
                               :system-prompt (system-prompt options)
-                              :store-backend backend}))
+                              :store-backend backend
+                              :orientation (:orientation options)}))
           (session/start! {:state-root (state-root options)
                            :project-root (or (:project options) ".")
                            :model-provider (model-provider options nil)
                            :system-prompt (system-prompt options)
-                           :store-backend backend}))]
+                           :store-backend backend
+                           :orientation (:orientation options)}))]
     (try
       (tui/start!
        {:agent-session agent-session
@@ -126,7 +129,8 @@
                          :project-root (or (:project options) ".")
                          :model-provider (model-provider options nil)
                          :system-prompt (system-prompt options)
-                         :store-backend (:store options)})]
+                         :store-backend (:store options)
+                         :orientation (:orientation options)})]
     (try (interactive! agent-session)
          (finally (session/close! agent-session :operator-exit)))))
 
@@ -141,7 +145,8 @@
                           :session-id session-id
                           :model-provider (model-provider options fallback)
                           :system-prompt (system-prompt options)
-                          :store-backend (:store options)})]
+                          :store-backend (:store options)
+                          :orientation (:orientation options)})]
     (try (interactive! agent-session)
          (finally (session/close! agent-session :operator-exit)))))
 
@@ -219,6 +224,8 @@
         "bbagent inspect SESSION_ID [--state PATH] [--store file|sqlite]\n"
         "bbagent s0a-sqlite-smoke --database PATH --project PATH\n"
         "bbagent s0b-native-smoke --phase PHASE --state PATH --session ID [--project PATH]\n"
+       "--orientation none|minimal|generated selects the model capability\n"
+       "  preamble; it adds no authority and defaults to none\n"
        "provider options: --endpoint URL --model ID [--reasoning-effort VALUE]\n"
        "                  [--allow-insecure-http true]\n"
        "--store selects the durable backend and defaults to sqlite\n"

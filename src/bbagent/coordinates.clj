@@ -121,7 +121,7 @@
 (defn session-envelope
   [{:keys [session-id run-id runtime-description context-description project
            provider endpoint model reasoning-effort allow-insecure-http
-           system-prompt]}]
+           system-prompt orientation]}]
   (let [manifest (:runtime/manifest runtime-description)
         spec (:context/spec context-description)
         effective (:context/effective context-description)]
@@ -146,5 +146,6 @@
                :requested-capabilities (:requested-capabilities spec)
                :authorized-capabilities (:authorized-capabilities spec)}
      :surface {:kind :persistent-sci :version 1}
-     :prompt {:system/digest (digest :bbagent/system-prompt system-prompt)}
+     :prompt {:system/digest (digest :bbagent/system-prompt system-prompt)
+              :orientation (or orientation :none)}
      :policy {:coordinate nil}}))

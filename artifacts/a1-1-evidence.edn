@@ -1,0 +1,58 @@
+{:milestone :a1.1
+ :question "Can the model discover and use its granted surface when oriented to apropos/doc and a generated capability preamble?"
+ :result :pass
+ :caveat "orientation fixed discovery but not unsupported claims; a fourth variant constraining assertions was required"
+
+ :method
+ {:runs 12
+  :variants [:none :minimal :generated :grounded]
+  :repetitions-per-variant 3
+  :model "Qwen3.6-27B-MTP-GGUF"
+  :endpoint "OpenAI-compatible loopback, Lemonade"
+  :prompt "What files does this project contain, and what does each one do?"
+  :prompt/provenance "the exact prompt that failed in the A1 dogfood"
+  :measurement "derived from the durable journal, not from return values"
+  :distinct-prompt-digests 4
+  :harness "script/orientation-compare.clj"}
+
+ :results
+ {:none      {:finished 0 :of 3 :attempts-mean 12.0 :errors-mean 10.7
+              :discovery-used 0 :concluded-limitation 0}
+  :minimal   {:finished 1 :of 3 :attempts-mean 11.0 :errors-mean 5.7
+              :discovery-used 3 :concluded-limitation 0}
+  :generated {:finished 2 :of 3 :attempts-mean 10.3 :errors-mean 6.7
+              :discovery-used 3 :concluded-limitation 0}
+  :grounded  {:finished 3 :of 3 :attempts-mean 3.3 :errors-mean 1.7
+              :discovery-used 3 :concluded-limitation 3}}
+
+ :findings
+ [{:finding "discovery adoption is the clean result"
+   :evidence "0/3 baseline used apropos or doc; 9/9 oriented runs did"
+   :confidence :high}
+  {:finding "orientation alone traded a visible failure for an invisible one"
+   :evidence "every :generated run that finished asserted what the project contains, having only guessed filenames and read them; the fixture happened to match, so the answers were accidentally correct"
+   :confidence :high
+   :note "the failure mode moved from guessing operation names, which errors loudly, to guessing file names, which succeeds quietly inside granted authority"}
+  {:finding "constraining claims rather than operations fixed it"
+   :evidence ":grounded swept every measure including 3/3 correct limitation reports, one of them in a single action"
+   :confidence :high}]
+
+ :authority
+ {:changed? false
+  :context-spec :unchanged
+  :grants :unchanged
+  :projected-class-count 0
+  :supplied-import-count 0
+  :bb4t-change-required? false
+  :note "apropos and doc were already in catalog/base-allow; orientation changes only the system message"}
+
+ :jvm-tests {:tests 107 :assertions 803 :failures 0 :errors 0}
+
+ :nonclaims
+ ["one model, one endpoint, one prompt, three repetitions per variant"
+  "minimal and generated overlap within noise; their ordering is not a result"
+  "one fixture whose filenames the model could plausibly guess"
+  "concludes-limitation? is a regex judgement; every classification was also read by hand"
+  "no capability was added, so this does not show project/list is the right next capability"
+  "the default remains :none"
+  "no native or TUI evidence for A1.1; the change is prompt composition on a path A1 proved natively"]}
