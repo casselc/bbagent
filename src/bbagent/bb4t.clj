@@ -117,8 +117,14 @@
   ([project-root profile] (create project-root profile nil))
   ([project-root profile options]
    (let [spec (context-spec profile)
+         ;; Trusted host code may hand over an environment it already built
+         ;; rather than have one built here.  A resumed session reuses the
+         ;; one its host is already holding, which is also what makes "the
+         ;; resume did not run anything" measurable: the invocation counter
+         ;; is on the environment, so it has to be the same environment.
          environment (when (contains? execution-profiles profile)
                        (or (:environment options)
+                           (:environment (:executor options))
                            (executor/create (:executor options))))
          runtime (runtime/create
                   {:resources (cond-> {:project/root project-root}
