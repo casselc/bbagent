@@ -38,13 +38,21 @@ Project code may do anything it likes to `/work`. None of it reaches the host,
 because the only host filesystem the machine can see is mounted read-only and
 the layer absorbing the writes lives and dies inside the machine.
 
+### Where the exact figures live
+
+`artifacts/a3a-evidence.edn` is the authoritative record. It describes one
+build, at one coordinate, and every figure in it comes from that build's own
+output. Where this document quotes a number it is quoting that artifact; where
+it quotes a measurement taken outside the build — the workspace and teardown
+experiments in sections 2 and 5 — it says so.
+
 ### What the evidence covers
 
 | Evidence | Result |
 |---|---|
-| bbagent deterministic suite | 184 tests, 1293 assertions, 0 failures |
+| bbagent deterministic suite | 184 tests, 1302 assertions, 0 failures |
 | bb4t deterministic suite | 25 tests, 198 assertions, 0 failures |
-| Native image | built at bb4t `5d6d0138` / bbagent `ac50797`; builder, source and image are one commit |
+| Native image | built at bb4t `5d6d0138` / bbagent `de1bf58`; builder, source and image are one commit |
 | A3a isolation and bounds, natively | 13 gates, all pass |
 | A3a lifecycle, natively | 6 gates, all pass |
 | A3a dogfood, natively | 4 gates, against the checkout the image was built from |
@@ -87,7 +95,7 @@ implementation. They are the substance of this milestone.
    a project that moved; it does not prevent the workload from having seen the
    move. For a single-player agent whose only other writer is its own serialized
    `project/edit`, this was judged sufficient.
-4. **Should A3b expose `project/run`?** Section 8 recommends it, with a new
+4. **Should A3b expose `project/run`?** Section 9 recommends it, with a new
    profile rather than a widened A2 one.
 
 ---
@@ -153,7 +161,30 @@ which is itself an overlay. Overlayfs refuses an overlayfs upperdir. The upper
 lives on the machine's ext4 disk instead — not on tmpfs, so build output
 competes with the machine's disk rather than with the compiler for RAM.
 
-## 3. Isolation, as measured
+## 3. Two edges tightened before freezing
+
+Neither was a defect the evidence caught; both were found by reading the code
+back with the question "what happens once a model can call this?"
+
+**The limits were approximate.** The entry and byte checks ran at the top of the
+next loop iteration, so a terminal entry could put a manifest one entry or one
+whole file past the stated maximum, because nothing came after it to notice.
+They now run before the entry is added, and the refusal names the entry that
+crossed the line. The tests pin the boundary from both sides — the exact count
+is accepted, one fewer is refused — rather than asserting that a large tree
+fails eventually.
+
+**Absolute symlinks were a fidelity hole, not a containment hole.** A link was
+refused only when its target lay outside the project root, so an absolute link
+*under* the root was accepted. It cannot escape: a worker resolves it inside its
+own filesystem. But `/home/me/project/lib/foo` is not `/work/lib/foo`, so the
+worker would resolve it against a path that does not exist there, and the
+manifest would be describing a tree that was not handed over. Every absolute
+target is now refused. Relative targets that stay under the root still are not,
+and the two refusals say different things because one is a containment question
+and the other is a fidelity question.
+
+## 4. Isolation, as measured
 
 | Property | How it was established |
 |---|---|
@@ -165,7 +196,7 @@ competes with the machine's disk rather than with the compiler for RAM.
 | Symlinks cannot widen the boundary | A link out of the tree fails the snapshot with an actionable error rather than being followed, matching A2's refusal to traverse links. |
 | Mount root is the boundary | `..` above a mount lands in the machine's own filesystem, not the host's parent. |
 
-## 4. Lifecycle
+## 5. Lifecycle
 
 ```text
 start workload
@@ -194,7 +225,7 @@ The reaping proof is a workload that appends to a host-visible file five times a
 second while its foreground command sleeps. At the deadline the file had grown;
 four seconds later it had not grown further, and no machine was running.
 
-## 5. Resource bounds, and what each claim rests on
+## 6. Resource bounds, and what each claim rests on
 
 | Bound | Status |
 |---|---|
@@ -212,7 +243,7 @@ hole — both are bounded transitively by the wall-clock deadline and by machine
 teardown — but neither is independently enforced, and the findings do not claim
 they are.
 
-## 6. What a result says
+## 7. What a result says
 
 ```clojure
 {:status :completed          ; or :timeout, :worker-failure
@@ -237,7 +268,7 @@ quiet flag, so its progress line was being reported as something the workload
 wrote. It is removed, and its bytes removed from the count, so both describe the
 workload alone.
 
-## 7. Dogfood
+## 8. Dogfood
 
 The target is the bbagent repository itself, and the command is
 `bb script/a3a-source-check.clj` — a babashka script the project keeps, checking
@@ -256,14 +287,18 @@ bbagent's own JVM suite would have required mounting a JDK and `~/.m2` — the
 latter a credential-adjacent tree — which is in tension with what the milestone
 is proving. See the nonclaims.
 
-Against the real repository: 102 entries, 858,944 bytes, check passed in 996ms.
-In the same worker a second command then ran `rm -rf src/bbagent`, overwrote
-`README.md`, and created `WORKER-WAS-HERE.txt`. It believed it succeeded. The
-host checkout's input coordinate was unchanged, `src/bbagent/worker.clj` was
-still present, `WORKER-WAS-HERE.txt` did not exist, and `git status` was
-byte-identical to before the run.
+From the image, against the checkout it was built from: 103 entries,
+869,622 bytes, check passed with exit 0 in 1172ms. In the same worker a second
+command then ran `rm -rf src/bbagent`, overwrote `README.md`, and created
+`WORKER-WAS-HERE.txt`. It believed it succeeded. The checkout's input coordinate
+was unchanged and `src/bbagent/worker.clj` was still there, with no
+`WORKER-WAS-HERE.txt` anywhere.
 
-## 8. Recommendation for A3b
+The same phase was also run from the JVM against this repository's live working
+tree, which is a different and constantly moving input, so its figures differ
+and are not recorded. `artifacts/a3a-evidence.edn` describes the build.
+
+## 9. Recommendation for A3b
 
 Expose one primitive, not a vocabulary:
 
@@ -288,10 +323,10 @@ A2's machinery will then refuse to re-run it during recovery, so
 
 resumes from its receipt rather than re-executing. A2 already fails closed on an
 actuation without a receipt, so an A3b operation inherits the right behaviour by
-being classified rather than by new recovery code. The result shape in section 6
+being classified rather than by new recovery code. The result shape in section 7
 is already inert data suitable for a receipt.
 
-## 9. A2, accepted and frozen
+## 10. A2, accepted and frozen
 
 A2 was re-verified before A3a began, not taken on the record.
 
@@ -312,13 +347,13 @@ now name the frozen pair.
 
 Both A2 profiles are marked frozen in `bb4t.catalog`. A capability added after
 A2 gets a new profile rather than widening one underneath recorded coordinates —
-which is exactly what section 8 recommends for A3b.
+which is exactly what section 9 recommends for A3b.
 
-## 10. Blockers
+## 11. Blockers
 
 None.
 
-## 11. Nonclaims
+## 12. Nonclaims
 
 - Linux x86_64 with KVM only. No claim about macOS, Windows, aarch64, or a host
   without `/dev/kvm`.

@@ -49,16 +49,27 @@ from 35 probes to 51 to prove the new reachability is not a new authority path.
 
 ### Evidence status
 
-- deterministic suites: bbagent 181 tests / 1275 assertions, bb4t 25 tests /
+- deterministic suites: bbagent 184 tests / 1302 assertions, bb4t 25 tests /
   198 assertions, 0 failures;
 - native image built with **no new reachability metadata, build flag, or
   dependency** — `bbagent.coordinates` already compiled a `ProcessBuilder` into
   the image;
 - authority in the image: 51 negatives denied, `:projected-class-count 0`,
   `:supplied-import-count 0`, and every A2 gate still passing;
-- dogfood against the real bbagent checkout: 102 entries, a real babashka check
-  passing in 996ms, and a workload that believed it deleted `src/bbagent`
-  leaving the checkout byte-identical.
+- dogfood from the image against the bbagent checkout it was built from: 103
+  entries, a real babashka check passing in 1172ms, and a workload that believed
+  it deleted `src/bbagent` leaving the checkout byte-identical.
+
+`artifacts/a3a-evidence.edn` is the authoritative record for exact figures;
+this document and `docs/A3A_FINDINGS.md` quote it.
+
+### Closed before freezing
+
+Two edges were tightened after the evidence was gathered, on the grounds that
+both are cheap now and expensive once a model can invoke this path: the snapshot
+limits are now exact rather than approximate at the final entry, and every
+absolute symlink is refused rather than only those pointing outside the root.
+See `docs/A3A_FINDINGS.md` section 3.
 
 ### Explicit exclusions
 
@@ -73,7 +84,7 @@ architecture are not redesigned.
 ### Stop gate
 
 Stop after A3a findings and fresh review. Do not begin A3b automatically;
-`docs/A3A_FINDINGS.md` section 8 recommends it, including that it needs a new
+`docs/A3A_FINDINGS.md` section 9 recommends it, including that it needs a new
 `:agent/project-execute` profile rather than a widened A2 one.
 
 ---
@@ -217,6 +228,14 @@ present capabilities; give me filenames to read"* — reaching that quickly and
 correctly is the result we want, because it distinguishes *cannot discover
 capability* from *discovers capability and finds it insufficient*. Only the
 second is evidence for adding `project/list`.
+
+### Closed before freezing
+
+Two edges were tightened after the evidence was gathered, on the grounds that
+both are cheap now and expensive once a model can invoke this path: the snapshot
+limits are now exact rather than approximate at the final entry, and every
+absolute symlink is refused rather than only those pointing outside the root.
+See `docs/A3A_FINDINGS.md` section 3.
 
 ### Explicit exclusions
 

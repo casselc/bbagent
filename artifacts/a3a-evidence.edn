@@ -5,10 +5,15 @@
 
  :coordinate
  {:bb4t/commit "5d6d01389da247e9fcc6cc0768ef0132a19da75c"
-  :bbagent/commit "ac507976864bd0e35b98d71395eef5e40a56d91f"
+  :bbagent/commit "de1bf58d9f677c7bca93adc144438a9f1adca33c"
   :builder "script/build-native"
-  :builder/commit "ac507976864bd0e35b98d71395eef5e40a56d91f"
-  :note "builder, source and image are one commit; only this artifact lands after it"}
+  :builder/commit "de1bf58d9f677c7bca93adc144438a9f1adca33c"
+  :bbagent/tag "bbagent-a3a"
+  :bb4t/tag "bb4t-a3a"
+  :runtime-vs-evidence "the tag names the evidence commit; :bbagent/commit above names the runtime the image was built from, which is its parent. The delta is this artifact and the findings. Nothing under src/, test/ or script/ differs."
+  :bb4t/note "bb4t has no A3a implementation; 5d6d0138 froze the A2 profile descriptions and is the bb4t coordinate this image was built from"
+  :authoritative? true
+  :note "this artifact is the exact-evidence record; prose quoting a figure is quoting this file"}
 
  :predecessor
  {:milestone :a2
@@ -91,11 +96,11 @@
  :dogfood
  {:project "the bbagent checkout the image was built from"
   :argv ["bb" "script/a3a-source-check.clj"]
-  :entry-count 102
-  :bytes 855074
-  :input-coordinate "sha256:f37ced7a084bcd6c3e04d019d396840508fece34ff13e0956b661d73524e9100"
+  :entry-count 103
+  :bytes 869622
+  :input-coordinate "sha256:b6fe0d99050b1c8b30812bd923ac8bf763a9e9a4f1d5b4b383af3355faf19840"
   :exit 0
-  :duration-ms 1095
+  :duration-ms 1172
   :stdout "checked 24 source and 14 test files\na3a-source-check OK"
   :check "namespace/path agreement, and that every test namespace is registered in the runner"
   :check/real? true
@@ -120,10 +125,13 @@
  :image
  {:path "dist/bbagent"
   :bytes 76155136
-  :sha256 "51938fec19ffe2f23bfc1d64806eaba201e33ffa126a9af78aee75af54d32303"
+  :sha256 "d1ebc47fabfdb76a607b356e5f01606906ace4b2a8cc176969b4241d32228549"
   :platform {:os "Ubuntu" :arch "x86_64" :libc "glibc"
              :kernel "Linux 7.0.0-29-generic" :hypervisor "KVM"}
-  :toolchain {:graalvm "Oracle GraalVM 25.2.4+7.1" :java "25.0.4"}
+  :toolchain {:graalvm "Oracle GraalVM 25.2.4+7.1"
+              :java "25.0.4"
+              :build "25.0.4+7-LTS-jvmci-25.2-b20"
+              :verified "read back from the builder's own java -version output, not transcribed"}
   :reproducibility "native-image is not reproducible; this digest identifies this artifact"}
 
  :dependencies
@@ -133,8 +141,17 @@
   :note "the machine manager is external and at a specific version; its behaviour was measured, not proven, and the reaping depends on its process-tree shape"}
 
  :suites
- {:bbagent {:tests 184 :assertions 1293 :failures 0 :errors 0}
+ {:bbagent {:tests 184 :assertions 1302 :failures 0 :errors 0}
   :bb4t {:tests 25 :assertions 198 :failures 0 :errors 0}}
+
+ :closure-fixes
+ [{:fix "snapshot limits are exact"
+   :was "the entry and byte checks ran at the top of the next iteration, so a terminal entry could put the manifest one entry or one whole file past the stated maximum"
+   :now "checked before the entry is added; the refusal names the entry that crossed the line; tests pin the boundary from both sides"}
+  {:fix "absolute symlinks are refused"
+   :was "a link was refused only when its target lay outside the project root, so an absolute link under the root was accepted"
+   :now "every absolute target is refused; relative targets that stay under the root are not"
+   :why "a fidelity question, not a containment question: an absolute link cannot escape, because the worker resolves it inside its own filesystem, but /host/project/lib/foo is not /work/lib/foo, so the manifest would describe a tree that was not handed over"}]
 
  :defects-found
  ["killing the machine manager orphans the machine, which keeps running and consuming CPU; the process primitive now reaps descendants first"
