@@ -39,5 +39,13 @@ HTTPS endpoints and plaintext loopback endpoints are allowed. Plaintext HTTP to 
 non-loopback host requires the explicit `--allow-insecure-http true` override or
 `BBAGENT_ALLOW_INSECURE_HTTP=true`. Provider requests do not follow redirects.
 
-See `docs/CURRENT_SCOPE.md` for current milestone boundaries and
+Trusted host code can run project-owned commands in a disposable virtual
+machine that sees the project read-only and has no network. This is substrate,
+not authority: no capability exposes it to the model, and the session's REPL
+surface is exactly what A2 froze. `script/a3a-source-check.clj` is the babashka
+check the worker is dogfooded against, and `bb script/a3a-source-check.clj`
+runs it directly.
+
+See `docs/CURRENT_SCOPE.md` for current milestone boundaries,
+`docs/A3A_FINDINGS.md` for what the worker does and does not claim, and
 `docs/architecture/0001-trusted-application-inclusion.md` for native inclusion.

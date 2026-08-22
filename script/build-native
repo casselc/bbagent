@@ -257,7 +257,7 @@ fi
 TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" s0a-sqlite-smoke \
   --database "$BUILD_ROOT/s0b-authority.db" --project "$S0B_PROJECT" \
   > "$BUILD_ROOT/s0b-authority.edn"
-if ! grep -Fq ':negative-probe/count 35' "$BUILD_ROOT/s0b-authority.edn" || \
+if ! grep -Fq ':negative-probe/count 51' "$BUILD_ROOT/s0b-authority.edn" || \
    ! grep -Fq 'java.sql.Date' "$BUILD_ROOT/s0b-authority.edn" || \
    ! grep -Fq 'java.sql.Timestamp' "$BUILD_ROOT/s0b-authority.edn" || \
    ! grep -Fq 'bbagent.journal/file-store' "$BUILD_ROOT/s0b-authority.edn" || \
@@ -312,6 +312,136 @@ do
     exit 1
   fi
 done
+
+# A3a: the image now drives a virtual machine manager so project-owned code
+# can be executed away from the authoritative project.  The model surface is
+# unchanged, so this is trusted reachability and must be proven not to be
+# anything else.
+for negative in 'bbagent.worker/require' \
+                'bbagent.worker/execute!' \
+                'bbagent.process/execute!' \
+                'bbagent.snapshot/manifest' \
+                'java.lang.ProcessBuilder' \
+                'java.lang.ProcessBuilder/start' \
+                'java.lang.Runtime/getRuntime' \
+                'java.lang.ProcessHandle' \
+                'clojure.java.shell/require' \
+                'project/run' \
+                'process/run' \
+                'smolvm/run'
+do
+  if ! grep -Fq "$negative" "$BUILD_ROOT/s0b-authority.edn"
+  then
+    echo "A3a authority negative missing: $negative" >&2
+    exit 1
+  fi
+done
+
+if ! command -v smolvm >/dev/null 2>&1
+then
+  echo "A3a evidence requires the smolvm machine manager on PATH" >&2
+  exit 1
+fi
+if ! command -v bb >/dev/null 2>&1
+then
+  echo "A3a dogfood requires babashka (bb) on PATH" >&2
+  exit 1
+fi
+
+A3A_PROJECT="$BUILD_ROOT/a3a-project"
+A3A_OUTSIDE="$BUILD_ROOT/a3a-outside"
+A3A_TOOLS="$BUILD_ROOT/a3a-tools"
+mkdir -p "$A3A_PROJECT/src" "$A3A_OUTSIDE" "$A3A_TOOLS"
+printf 'original\n' > "$A3A_PROJECT/src/a.txt"
+printf 'keep me\n' > "$A3A_PROJECT/src/b.txt"
+printf 'SENTINEL-OUTSIDE-THE-PROJECT\n' > "$A3A_OUTSIDE/host-secret.txt"
+install -m 0755 "$(command -v bb)" "$A3A_TOOLS/bb"
+smolvm --version > "$BUILD_ROOT/a3a-smolvm-version.txt"
+bb --version > "$BUILD_ROOT/a3a-bb-version.txt"
+
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3a-worker-smoke \
+  --phase describe --project "$A3A_PROJECT" > "$BUILD_ROOT/a3a-describe.edn"
+if ! grep -Fq ':worker/available? true' "$BUILD_ROOT/a3a-describe.edn"
+then
+  echo "A3a: the native image could not reach the machine manager" >&2
+  exit 1
+fi
+
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3a-worker-smoke \
+  --phase probe --project "$A3A_PROJECT" \
+  --sentinel "$A3A_OUTSIDE/host-secret.txt" > "$BUILD_ROOT/a3a-probe.edn"
+for gate in ':probe/exit-zero :ok' \
+            ':probe/exit-exact :ok' \
+            ':probe/streams-separated :ok' \
+            ':probe/workload-believed-it-wrote :ok' \
+            ':probe/host-project-unchanged :ok' \
+            ':probe/host-file-unreadable :ok' \
+            ':probe/network-unreachable :ok' \
+            ':probe/environment-constructed :ok' \
+            ':probe/stdout-bounded :ok' \
+            ':probe/duration-reported :ok' \
+            ':probe/coordinate-stable :ok' \
+            ':probe/coordinate-sensitive :ok' \
+            ':probe/uncommitted-work-visible :ok'
+do
+  if ! grep -Fq "$gate" "$BUILD_ROOT/a3a-probe.edn"
+  then
+    echo "A3a isolation gate failed: $gate" >&2
+    exit 1
+  fi
+done
+if grep -Fq ':failed' "$BUILD_ROOT/a3a-probe.edn"
+then
+  echo "A3a probe reported a failed gate" >&2
+  exit 1
+fi
+# The sentinel must not appear anywhere in the evidence, including in an
+# error message that helpfully quoted what it could not read.
+if grep -Fq 'SENTINEL-OUTSIDE-THE-PROJECT' "$BUILD_ROOT/a3a-probe.edn"
+then
+  echo "A3a probe leaked the host sentinel into its own evidence" >&2
+  exit 1
+fi
+
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3a-worker-smoke \
+  --phase timeout --project "$A3A_PROJECT" > "$BUILD_ROOT/a3a-timeout.edn"
+for gate in ':timeout/program-chose-124 :ok' \
+            ':timeout/deadline-is-distinct :ok' \
+            ':timeout/disposition-terminated :ok' \
+            ':timeout/workload-was-running :ok' \
+            ':timeout/in-machine-child-stopped :ok' \
+            ':timeout/nothing-left-running :ok'
+do
+  if ! grep -Fq "$gate" "$BUILD_ROOT/a3a-timeout.edn"
+  then
+    echo "A3a lifecycle gate failed: $gate" >&2
+    exit 1
+  fi
+done
+
+# The dogfood target is the bbagent checkout this image was built from: a
+# real project, a script it actually keeps, and a working tree rather than a
+# revision.
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3a-worker-smoke \
+  --phase dogfood --project "$BUILD_ROOT/bbagent" \
+  --tools "$A3A_TOOLS" > "$BUILD_ROOT/a3a-dogfood.edn"
+for gate in ':dogfood/check-passed :ok' \
+            ':dogfood/coordinate-recorded :ok' \
+            ':dogfood/vandal-believed-it-succeeded :ok' \
+            ':dogfood/host-project-intact :ok'
+do
+  if ! grep -Fq "$gate" "$BUILD_ROOT/a3a-dogfood.edn"
+  then
+    echo "A3a dogfood gate failed: $gate" >&2
+    exit 1
+  fi
+done
+if [ -e "$BUILD_ROOT/bbagent/WORKER-WAS-HERE.txt" ] || \
+   [ ! -e "$BUILD_ROOT/bbagent/src/bbagent/worker.clj" ]
+then
+  echo "A3a dogfood workload reached the authoritative checkout" >&2
+  exit 1
+fi
 
 shopt -s nullglob dotglob
 runtime_tmp_entries=("$RUNTIME_TMP"/*)
@@ -383,6 +513,9 @@ fi
     "$BUILD_ROOT/s0b-transaction-exit.edn" \
     "$BUILD_ROOT/s0b-transaction-check.edn" \
     "$BUILD_ROOT/s0b-authority.edn" "$S0B_STATE/bbagent.sqlite3" \
+    "$BUILD_ROOT/a3a-describe.edn" "$BUILD_ROOT/a3a-probe.edn" \
+    "$BUILD_ROOT/a3a-timeout.edn" "$BUILD_ROOT/a3a-dogfood.edn" \
+    "$BUILD_ROOT/a3a-smolvm-version.txt" "$BUILD_ROOT/a3a-bb-version.txt" \
     "$BUILD_ROOT/missing-sidecar.out" "$BUILD_ROOT/missing-sidecar.err" \
     "$BUILD_ROOT/mismatched-sidecar.out" \
     "$BUILD_ROOT/mismatched-sidecar.err" \

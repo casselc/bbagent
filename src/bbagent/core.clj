@@ -2,6 +2,8 @@
   (:require [bbagent.agent :as agent]
             [bbagent.orientation :as orientation]
             [bbagent.provider :as provider]
+            [bbagent.a3a-smoke :as a3a-smoke]
+            [bbagent.worker :as worker]
             [bbagent.s0b-smoke :as s0b-smoke]
             [bbagent.session :as session]
             [bbagent.sqlite :as sqlite]
@@ -230,6 +232,31 @@
                                           :session-id (:session options)}))
       (throw (ex-info "S0b smoke requires a known --phase" {:phase phase})))))
 
+(defn- a3a-smoke-command [options]
+  (let [unknown (seq (remove #{:arguments :phase :project :sentinel :tools}
+                             (keys options)))
+        phase (:phase options)]
+    (when unknown
+      (throw (ex-info "Unknown A3a smoke options" {:options (vec unknown)})))
+    (when (seq (:arguments options))
+      (throw (ex-info "A3a smoke does not accept positional arguments" {})))
+    (when-not (:project options)
+      (throw (ex-info "A3a smoke requires --project PATH" {})))
+    (case phase
+      "probe" (do
+                (when-not (:sentinel options)
+                  (throw (ex-info "A3a probe requires --sentinel PATH" {})))
+                (prn (a3a-smoke/probe! {:project-root (:project options)
+                                        :outside-sentinel (:sentinel options)})))
+      "timeout" (prn (a3a-smoke/timeout! {:project-root (:project options)}))
+      "dogfood" (do
+                  (when-not (:tools options)
+                    (throw (ex-info "A3a dogfood requires --tools PATH" {})))
+                  (prn (a3a-smoke/dogfood! {:project-root (:project options)
+                                            :tools [(:tools options)]})))
+      "describe" (prn (worker/describe))
+      (throw (ex-info "A3a smoke requires a known --phase" {:phase phase})))))
+
 (defn- usage []
   (str "bbagent tui [SESSION_ID] [--project PATH] [--store file|sqlite]\n"
        "bbagent run [--project PATH] [--store file|sqlite] [provider options]\n"
@@ -272,6 +299,7 @@
                    (throw (ex-info "inspect requires a session ID" {})))
       "s0a-sqlite-smoke" (sqlite-smoke-command options)
       "s0b-native-smoke" (s0b-smoke-command options)
+      "a3a-worker-smoke" (a3a-smoke-command options)
       "describe" (prn {:application :bbagent
                          :scope :a1
                          :surface :persistent-sci})

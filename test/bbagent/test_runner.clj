@@ -6,10 +6,12 @@
              [bbagent.orientation-test]
              [bbagent.provider-test]
              [bbagent.replay-test]
+             [bbagent.snapshot-test]
              [bbagent.sqlite-store-test]
              [bbagent.sqlite-test]
              [bbagent.store-contract-test]
              [bbagent.tui-test]
+             [bbagent.worker-test]
              [clojure.test :as test])
   (:gen-class))
 
@@ -22,9 +24,11 @@
                         'bbagent.orientation-test
                         'bbagent.provider-test
                         'bbagent.replay-test
+                        'bbagent.snapshot-test
                         'bbagent.sqlite-store-test
                         'bbagent.sqlite-test
                         'bbagent.store-contract-test
-                        'bbagent.tui-test)]
+                        'bbagent.tui-test
+                        'bbagent.worker-test)]
     (when (pos? (+ fail error))
       (System/exit 1))))

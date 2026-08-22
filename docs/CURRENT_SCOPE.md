@@ -1,11 +1,84 @@
-# Current Scope: A2
+# Current Scope: A3a
 
-**For review.** `docs/A2_FINDINGS.md` section 0 is the reviewer's entry point:
-verdict, evidence table, and the decisions it needs. This document states scope;
-that one states results.
+**For review.** `docs/A3A_FINDINGS.md` section 0 is the reviewer's entry point:
+verdict, the boundary, evidence table, and the decisions it needs. This document
+states scope; that one states results.
 
 **Milestone status:** A0 PASS, S0a PASS, S0b PASS, A1 PASS, A1.1 PASS
-(frozen at `bbagent-a1.1`), A2 complete, recommended PASS.
+(frozen at `bbagent-a1.1`), **A2 PASS (accepted, frozen at `bbagent-a2` /
+`bb4t-a2`)**, A3a complete, recommended PASS.
+
+## A3a: isolated project execution
+
+A3a asks whether trusted host code can execute arbitrary project-owned code in
+a hard-bounded worker, get a structured result, terminate it reliably, and prove
+the execution cannot reach the authoritative checkout, host secrets, or the
+network.
+
+It is a substrate milestone. **The model gains no new authority**: the bounded
+Context grants exactly what A2 froze, and the authority negative corpus grew
+from 35 probes to 51 to prove the new reachability is not a new authority path.
+
+### Delivered
+
+- **`bbagent.process`**: bounded host subprocess execution — a deadline, output
+  budgets, and a process tree that is actually dead when the call returns. The
+  unbounded `ProcessBuilder` that read git coordinates at session start now goes
+  through it, so that call has a deadline for the first time.
+- **`bbagent.snapshot`**: the project input manifest and its coordinate. Sorted
+  by path, exclusions recorded rather than applied silently, symbolic links
+  described and never followed, and a link out of the tree refused.
+- **`bbagent.worker`**: the one place that knows a machine manager exists. One
+  ephemeral machine per execution, the project mounted read-only, an overlay
+  whose upper layer lives and dies inside the machine, and an environment that
+  is constructed rather than filtered.
+- **Native evidence**: 13 isolation and bounds gates, 6 lifecycle gates, and 4
+  dogfood gates, all run from the image by `script/build-native`.
+- **A dogfood that is a real check**: `script/a3a-source-check.clj` verifies
+  namespace/path agreement and that every test namespace is registered in the
+  runner — an invariant this repository violated while A3a was being written.
+
+### Two measured results that changed the design
+
+- killing the machine manager process is **not** cleanup: it orphans the
+  machine, which keeps running. The process primitive destroys descendants
+  first, which is what actually ends the workload.
+- the overlay's lower layer is **live**, not a frozen copy, so a run whose
+  project moved under it reports no input coordinate rather than one naming a
+  state it only half saw.
+
+### Evidence status
+
+- deterministic suites: bbagent 181 tests / 1275 assertions, bb4t 25 tests /
+  198 assertions, 0 failures;
+- native image built with **no new reachability metadata, build flag, or
+  dependency** — `bbagent.coordinates` already compiled a `ProcessBuilder` into
+  the image;
+- authority in the image: 51 negatives denied, `:projected-class-count 0`,
+  `:supplied-import-count 0`, and every A2 gate still passing;
+- dogfood against the real bbagent checkout: 102 entries, a real babashka check
+  passing in 996ms, and a workload that believed it deleted `src/bbagent`
+  leaving the checkout byte-identical.
+
+### Explicit exclusions
+
+No model-visible `project/run`, `project/test`, or `project/build`; no generic
+shell capability; no background processes or dev-server lifecycle; no Git
+tooling; no network enablement; no package-installation policy; no pods as the
+execution path; no worker pools; no subagents, Mycelium, memory, skills, SCI
+Extension Manager, Cedar, Chiasmus, autonomous daemon, or MCP/A2A/ACP. A2's
+operation transcripts, SQLite storage, checkpoints, ContextSpec and TUI
+architecture are not redesigned.
+
+### Stop gate
+
+Stop after A3a findings and fresh review. Do not begin A3b automatically;
+`docs/A3A_FINDINGS.md` section 7 recommends it, including that it needs a new
+`:agent/project-execute` profile rather than a widened A2 one.
+
+---
+
+## A2 (accepted, frozen at `bbagent-a2` / `bb4t-a2`)
 
 ## A2: useful semantic project world
 
@@ -86,8 +159,9 @@ Defects that only appeared from using it, all fixed; see `docs/A2_FINDINGS.md`:
 
 ### Still open in A2
 
-Nothing blocking. `project/test` is deliberately excluded and is the natural
-next milestone. Neither is any shell, process, or Git capability. The
+Nothing blocking. `project/test` was deliberately excluded; A3a answered the
+substrate question underneath it and recommends a `project/run` primitive
+instead. Neither shell nor Git capability was added. The
 measurement target also needs revisiting: the A1.1 harness's
 `concludes-limitation?` scored the right answer while enumeration was missing,
 and now scores the wrong thing.

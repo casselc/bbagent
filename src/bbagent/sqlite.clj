@@ -14,7 +14,7 @@
 (def ^:private sqlite-sidecar-sha256
   "f374da845a36d0a663521457f8e454413325e3b8247a15c2677426f4b15cf6ac")
 
-(def ^:private authority-negative-count 35)
+(def ^:private authority-negative-count 51)
 
 (defn- ensure! [condition message data]
   (when-not condition
@@ -254,7 +254,32 @@
      "(require '[bbagent.tui.command :as tui-command])"
      "bbagent.tui.command/start-worker!"
      "(bbagent.tui.command/start-worker! {})"
-     "bbagent.tui.state/require" "(require '[bbagent.tui.state :as tui-state])"}))
+     "bbagent.tui.state/require" "(require '[bbagent.tui.state :as tui-state])"
+
+     ;; A3a: the image now drives a virtual machine manager to run
+     ;; project-owned code.  That is trusted host reachability and nothing
+     ;; else.  The model gains no execution operation, cannot name the
+     ;; implementation, and cannot reach the process primitive underneath
+     ;; it or the general-purpose JVM process API beside it.
+     "bbagent.worker/require" "(require '[bbagent.worker :as worker])"
+     "bbagent.worker/execute!"
+     "(bbagent.worker/execute! {:project-root \".\" :argv [\"true\"]})"
+     "bbagent.worker/describe" "(bbagent.worker/describe)"
+     "bbagent.process/require" "(require '[bbagent.process :as process])"
+     "bbagent.process/execute!"
+     "(bbagent.process/execute! {:argv [\"true\"] :timeout-ms 1000})"
+     "bbagent.snapshot/require" "(require '[bbagent.snapshot :as snapshot])"
+     "bbagent.snapshot/manifest" "(bbagent.snapshot/manifest \".\")"
+     "java.lang.ProcessBuilder" "java.lang.ProcessBuilder"
+     "java.lang.ProcessBuilder/start"
+     "(.start (java.lang.ProcessBuilder. [\"true\"]))"
+     "java.lang.Runtime" "java.lang.Runtime"
+     "java.lang.Runtime/getRuntime" "(java.lang.Runtime/getRuntime)"
+     "java.lang.ProcessHandle" "java.lang.ProcessHandle"
+     "clojure.java.shell/require" "(require '[clojure.java.shell :as shell])"
+     "project/run" "(project/run {:argv [\"true\"]})"
+     "process/run" "(process/run {:argv [\"true\"]})"
+     "smolvm/run" "(smolvm/run {:argv [\"true\"]})"}))
 
 (defn authority-smoke!
   "Proves the actual A0 Context remains unchanged despite trusted SQLite reachability."

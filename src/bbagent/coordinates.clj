@@ -1,5 +1,6 @@
 (ns bbagent.coordinates
-  (:require [clojure.java.io :as io]
+  (:require [bbagent.process :as process]
+            [clojure.java.io :as io]
             [clojure.string :as str])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file LinkOption Path Paths]
@@ -57,6 +58,24 @@
 (defn sha-256 [^String value]
   (sha-256-bytes (.getBytes value StandardCharsets/UTF_8)))
 
+(defn sha-256-path
+  "The SHA-256 of a file's bytes, read as a stream.
+
+   A project input coordinate digests whatever the project happens to
+   contain, which is not bounded by anything bbagent chose, so the file is
+   never held in memory whole."
+  [^Path path]
+  (let [digest (MessageDigest/getInstance "SHA-256")
+        buffer (byte-array 65536)]
+    (with-open [stream (java.nio.file.Files/newInputStream
+                        path (make-array java.nio.file.OpenOption 0))]
+      (loop []
+        (let [read (.read stream buffer)]
+          (when-not (neg? read)
+            (.update digest buffer 0 read)
+            (recur)))))
+    (apply str (map #(format "%02x" (bit-and (int %) 0xff)) (.digest digest)))))
+
 (defn digest [kind value]
   (when-not (qualified-keyword? kind)
     (throw (ex-info "Coordinate kind must be a qualified keyword"
@@ -69,15 +88,24 @@
   (or (some-> (io/resource resource-name) slurp str/trim not-empty)
       "unknown"))
 
+(def ^:private git-timeout-ms
+  "How long a session start will wait for git to describe the project.
+
+   A coordinate is worth having and is not worth hanging for.  A repository
+   on a stalled network filesystem used to be able to block session start
+   indefinitely, because the call had no deadline at all."
+  15000)
+
 (defn- git-command [root & args]
   (try
-    (let [command (into ["git" "-C" root] args)
-          process (.start (ProcessBuilder. ^java.util.List command))
-          stdout (future (slurp (.getInputStream process)))
-          stderr (future (slurp (.getErrorStream process)))
-          status (.waitFor process)]
-      @stderr
-      {:status status :output (str/trim @stdout)})
+    (let [result (process/execute!
+                  {:argv (into ["git" "-C" (str root)] args)
+                   :timeout-ms git-timeout-ms
+                   ;; git reads its own configuration out of the ambient
+                   ;; environment, so this one call keeps it.
+                   :inherit-environment? true})]
+      (when (= :exited (:status result))
+        {:status (:exit result) :output (str/trim (:stdout result))}))
     (catch Throwable _ nil)))
 
 (defn- successful-output [result]

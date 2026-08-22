@@ -10,7 +10,19 @@ Standing rules:
 - record explicit coordinates and honest unknown/development values;
 - prefer the smallest implementation that answers the active milestone question.
 
-For A2 (see `docs/CURRENT_SCOPE.md`):
+For A3a (see `docs/CURRENT_SCOPE.md`):
+
+- project-owned code runs in a disposable worker, never against the
+  authoritative checkout; the project is mounted read-only and the writable
+  layer lives and dies inside the machine;
+- a host subprocess gets a deadline, an output budget, and a reaped process
+  tree — go through `bbagent.process`, never a bare `ProcessBuilder`;
+- `bbagent.worker` is the only namespace that knows a machine manager exists;
+  keep the manager's command line out of everything else;
+- an execution result names the project state it ran against, or names none at
+  all; never one the run only partly saw.
+
+For A2, still standing:
 
 - recovery reconstructs a session's computational state and never re-observes or
   re-actuates the project; a semantic operation invoked during replay returns its

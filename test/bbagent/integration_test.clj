@@ -68,7 +68,7 @@
            (set (map :status (vals (:negative-probes result))))))
     (is (= #{:bb4t-evaluation-failure}
             (set (map :error/category (vals (:negative-probes result))))))
-    (is (= 35 (:negative-probe/count result)))
+    (is (= 51 (:negative-probe/count result)))
     (is (every? #(contains? (:negative-probes result) %)
                 ["java.sql.Date" "java.sql.Timestamp"
                  "bbagent.journal/require" "bbagent.journal/file-store"]))
@@ -81,6 +81,22 @@
                    "charm.terminal/create-terminal"
                    "bbagent.tui.app/require"
                    "bbagent.tui.command/start-worker!"])))
+    (testing "driving a virtual machine manager does not widen model authority"
+      ;; A3a compiles worker, snapshot and process reachability into the
+      ;; image.  None of it is nameable from the bounded Context, and no
+      ;; execution operation appeared beside the A2 surface.
+      (is (every? #(contains? (:negative-probes result) %)
+                  ["bbagent.worker/require"
+                   "bbagent.worker/execute!"
+                   "bbagent.process/execute!"
+                   "bbagent.snapshot/manifest"
+                   "java.lang.ProcessBuilder"
+                   "java.lang.ProcessBuilder/start"
+                   "java.lang.Runtime/getRuntime"
+                   "java.lang.ProcessHandle"
+                   "project/run"
+                   "process/run"
+                   "smolvm/run"])))
     (is (false? (:forbidden-database/created? result)))))
 
 (deftest frozen-a0-profile-is-unchanged-test
