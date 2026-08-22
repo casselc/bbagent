@@ -276,6 +276,18 @@
       "describe" (prn (worker/describe))
       (throw (ex-info "A3a smoke requires a known --phase" {:phase phase})))))
 
+(defn- emit-evidence!
+  "Prints one evidence map the same way everywhere.
+
+   `prn` abbreviates a map whose keys share a namespace, and whether it does
+   depends on `*print-namespace-maps*`, which clojure.main binds to true and a
+   native image leaves false.  The build gates grep this output, so the two
+   have to agree; binding it here means a phase verified on the JVM is
+   verifying the text the image will actually produce."
+  [value]
+  (binding [*print-namespace-maps* false]
+    (prn value)))
+
 (defn- a3b-smoke-command [options]
   (let [unknown (seq (remove #{:arguments :phase :project :sentinel :tools}
                              (keys options)))
@@ -292,16 +304,16 @@
     (when-not (:tools options)
       (throw (ex-info "A3b smoke requires --tools PATH" {})))
     (case phase
-      "describe" (prn (a3b-smoke/describe! settings))
-      "version" (prn (a3b-smoke/version! settings))
-      "authority" (prn (a3b-smoke/authority! settings))
+      "describe" (emit-evidence! (a3b-smoke/describe! settings))
+      "version" (emit-evidence! (a3b-smoke/version! settings))
+      "authority" (emit-evidence! (a3b-smoke/authority! settings))
       "probe" (do
                 (when-not (:sentinel options)
                   (throw (ex-info "A3b probe requires --sentinel PATH" {})))
-                (prn (a3b-smoke/probe! settings)))
-      "unstable" (prn (a3b-smoke/unstable! settings))
-      "replay" (prn (a3b-smoke/replay! settings))
-      "dogfood" (prn (a3b-smoke/dogfood! settings))
+                (emit-evidence! (a3b-smoke/probe! settings)))
+      "unstable" (emit-evidence! (a3b-smoke/unstable! settings))
+      "replay" (emit-evidence! (a3b-smoke/replay! settings))
+      "dogfood" (emit-evidence! (a3b-smoke/dogfood! settings))
       (throw (ex-info "A3b smoke requires a known --phase" {:phase phase})))))
 
 (defn- usage []

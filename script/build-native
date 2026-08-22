@@ -463,8 +463,8 @@ TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3b-execute-smoke \
   --phase describe --project "$A3B_PROJECT" \
   --tools "$A3A_TOOLS" > "$BUILD_ROOT/a3b-describe.edn"
 if ! grep -Fq ':executor/available? true' "$BUILD_ROOT/a3b-describe.edn" || \
-   ! grep -Fq ':approval :recognized' "$BUILD_ROOT/a3b-describe.edn" || \
-   ! grep -Fq ':network :none' "$BUILD_ROOT/a3b-describe.edn"
+   ! grep -Fq ':executor/approval :recognized' "$BUILD_ROOT/a3b-describe.edn" || \
+   ! grep -Fq ':executor/network :none' "$BUILD_ROOT/a3b-describe.edn"
 then
   echo "A3b: the native image could not authorize an execution environment" >&2
   exit 1
@@ -489,14 +489,14 @@ done
 TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3b-execute-smoke \
   --phase authority --project "$A3B_PROJECT" \
   --tools "$A3A_TOOLS" > "$BUILD_ROOT/a3b-authority.edn"
-for gate in ':profile :agent/project-execute' \
-            ':run-granted :ok' \
-            ':develop-plus-one :ok' \
-            ':all-refused :ok' \
-            ':refused-for-the-right-reason :ok' \
-            ':no-host-path-in-executor :ok' \
-            ':projected-class-count 0' \
-            ':supplied-import-count 0'
+for gate in ':authority/profile :agent/project-execute' \
+            ':authority/run-granted :ok' \
+            ':authority/develop-plus-one :ok' \
+            ':authority/all-refused :ok' \
+            ':authority/refused-for-the-right-reason :ok' \
+            ':authority/no-host-path-in-executor :ok' \
+            ':authority/projected-class-count 0' \
+            ':authority/supplied-import-count 0'
 do
   if ! grep -Fq "$gate" "$BUILD_ROOT/a3b-authority.edn"
   then
