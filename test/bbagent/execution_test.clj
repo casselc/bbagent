@@ -11,6 +11,8 @@
   (:require [bb4t.catalog :as catalog]
             [bb4t.execution :as execution]
             [bbagent.bb4t :as app-runtime]
+            [bbagent.provider :as provider]
+            [bbagent.session :as session]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]])
@@ -350,3 +352,63 @@
     (is (= 0 (:projected-class-count surface)))
     (is (= 0 (:supplied-import-count surface)))
     (is (contains? (set (map :sci/var (:projections surface))) 'project/run))))
+
+;; ---------------------------------------------------------------------------
+;; Through the session envelope, not just the Context
+
+(deftest a-session-resumed-with-execution-restores-its-run-without-repeating-it
+  ;; The Context-level proof above shows replay reproduces a receipt.  This
+  ;; shows the same thing through the durable path a real session takes:
+  ;; started, checkpointed, thrown away, and rebuilt from its own events.
+  (let [environment (stub)
+        state-root (str (Files/createTempDirectory
+                         "bbagent-execution-session"
+                         (make-array FileAttribute 0)))
+        project-root (temp-project)
+        session-id "execution-resume"
+        options {:state-root state-root
+                 :project-root project-root
+                 :model-provider (provider/fake [])
+                 :system-prompt "base"
+                 :session-id session-id
+                 :store-backend :file
+                 :profile :agent/project-execute
+                 :executor {:environment environment}}
+        session (session/start! options)]
+    (session/operator-evaluate!
+     session "(def verification (project/run {:argv [\"bb\" \"check\"]}))")
+    (is (= 1 (count @(:requests environment))))
+    (session/close! session :test)
+    (let [resumed (session/resume! {:state-root state-root
+                                    :session-id session-id
+                                    :model-provider (provider/fake [])
+                                    :system-prompt "base"
+                                    :store-backend :file
+                                    :executor {:environment environment}})]
+      (try
+        (is (= 1 (count @(:requests environment)))
+            "resuming the session ran the command a second time")
+        (testing "and the reconstructed Context still holds what it returned"
+          (is (= 0 (get-in (session/operator-evaluate! resumed "(:exit verification)")
+                           [:evaluation :value :value/data]))))
+        (testing "and it kept the profile it was created with"
+          (let [resumed-event (->> (session/session-events resumed)
+                                   (filter #(= :session/resumed (:event/type %)))
+                                   last)]
+            (is (= :agent/project-execute
+                   (get-in resumed-event [:session/coordinate :context :profile])))))
+        (finally (session/close! resumed :test))))))
+
+(deftest a-session-that-cannot-build-an-executor-does-not-start
+  (let [state-root (str (Files/createTempDirectory
+                         "bbagent-execution-noexec"
+                         (make-array FileAttribute 0)))]
+    (is (thrown? Exception
+                 (session/start! {:state-root state-root
+                                  :project-root (temp-project)
+                                  :model-provider (provider/fake [])
+                                  :system-prompt "base"
+                                  :session-id "execution-refused"
+                                  :store-backend :file
+                                  :profile :agent/project-execute
+                                  :executor {:tools "/nonexistent/bundle"}})))))
