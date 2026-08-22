@@ -34,6 +34,24 @@ and not glossed.
   smolvm 1.7.5
 ```
 
+**Evidence**
+
+| What | Measured |
+|---|---|
+| native gates, all entered through `project/run` | 43 — version 5, authority 8, isolation 14, unstable-input 5, replay 7, dogfood 4 |
+| A3a's own gates, re-run from the A3b image | 13 probe + 6 lifecycle + 4 dogfood, unchanged |
+| authority, default profile | 58 negatives refused (was 51) |
+| authority, execution profile | `project/run` granted, 20 negatives refused |
+| projected classes / supplied imports | 0 / 0, both profiles |
+| deterministic suites | bbagent 217 tests / 1419 assertions, bb4t 25 / 199, 0 failures |
+| TUI PTY gates | 37/37 |
+| image | `sha256:9b4f5b21…`, 76 876 032 bytes, no new reachability metadata, build flag, or dependency |
+| executor coordinate | `sha256:8ed0e559…` — identical from the JVM and from the image |
+| live dogfood | 3/3 arms finished: edit→verify→finish, resume with no second execution, unstable input reported distinctly |
+
+`artifacts/a3b-evidence.edn` is the authoritative record; any figure quoted in
+prose is quoting that file.
+
 **Decisions this needs from a reviewer**
 
 1. `:project/execute` is classified `:actuation`. A recovery cannot know whether
@@ -315,6 +333,64 @@ host-policy argument someone might try to pass to `project/run` are all refused.
   workspace and not this one.
 - **The tool bundle is trusted, not verified.** Its digest identifies which bytes
   ran; nothing here says those bytes are benign.
+
+## 10a. The live dogfood
+
+A local Qwen3.6-27B under `:agent/project-execute`, one fixture per arm, and a
+task that cannot be short-circuited: the fixture's check fails, and nothing in
+the project states the required value or the command except the check itself.
+
+**verify — inspect, edit, verify, finish.** Finished in 14 actions. It read the
+check and the source, called `project/run` with `:timeout`, was refused before
+the call reached the execution environment, called `(doc project/run)`, re-ran
+correctly and got `exit 1` with `FAIL: ... found 7`, offered a whole file as
+`:base` and was refused, called `project/stat`, edited anchored to the digest,
+re-ran and got `exit 0` with `quarry check OK: spacing 9`. Two executions, both
+anchored, to two different input coordinates -- the second differs because the
+project genuinely moved between them.
+
+Worth noting on its own: three `project/run` calls produced two executor
+invocations. The refused one never reached the environment, which is the
+argument validation being a bb4t property rather than a worker one.
+
+**resume — the historical run reconstructs.** Finished in 10 actions, then the
+session was closed and rebuilt from its durable events. All 10 forms
+reconstructed, nothing re-observed, no legacy fallback, and the executor's
+invocation count was 1 before the resume and 1 after. A live session that
+edited and verified its own work came back without verifying it again.
+
+**unstable — a moved project cannot masquerade.** The host rewrote a file in the
+project every 400ms for the whole turn, rather than once at a guessed moment.
+Both of the model's executions came back `:status :project-changed`, with no
+`:exit` and no `:project/input-coordinate`, and it still completed the task. It
+was told its result was not anchored instead of being handed an apparent
+success.
+
+## 10b. What the dogfood found about the dogfood
+
+The first live run is worth recording because the model was right and the
+harness was wrong. Its fixture's check script is generated from Clojure string
+literals, and the escaping produced `#"\\(def spacing (\\d+)\\)"` in the
+emitted file -- a regex matching a literal backslash, which never matches. The
+check could not pass however the project was edited. That was verified against
+a hand-written copy of the script rather than against the one the harness
+actually writes, which is the same mistake as writing a build gate against how
+the output was expected to look.
+
+What the model did with an unpassable check is the interesting part. It
+explored the project, read the check, ran it and got `exit 1`, made an anchored
+edit using `(project/stat "...")` inline as the `:base`, re-ran and still got
+`exit 1`, read the file back and saw its own edit was applied, tried to debug
+the regex in SCI and was correctly refused because `re-find` is not granted --
+and then ran `bb -e` through `project/run` to evaluate the regex inside the
+worker, getting `MATCH: nil`. It diagnosed that the check was broken rather
+than concluding its edit had failed.
+
+That is the composition the milestone is for: a task-specific investigation
+built out of one granted execution primitive, with no new host tool. It is also
+the strongest available evidence that `project/run` is usable rather than
+merely present, and it was produced by a bug rather than by design, so it is
+recorded here rather than claimed as a designed result.
 
 ## 11. What A3b deliberately did not do
 

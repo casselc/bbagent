@@ -1,0 +1,210 @@
+{:milestone :a3b
+ :evidence :semantic-project-execution
+ :result :pass
+ :question "Can one minimal semantic project/run capability expose the proven isolated execution substrate to bounded SCI without creating another authority path, weakening A2 replay semantics, or making unanchored execution look like verification evidence?"
+
+ :coordinate
+ {:bb4t/commit "227d38542d76565c2e3ac64d0c682141b1d597b9"
+  :bbagent/commit "84201fc5e2f8c0e2be72e07b44bd9e0bd2c7aed9"
+  :builder "script/build-native"
+  :builder/commit "84201fc5e2f8c0e2be72e07b44bd9e0bd2c7aed9"
+  :runtime-vs-evidence "the image, the native gates and both suites were produced at :bbagent/commit above. The commit carrying this artifact is later and adds only docs/, artifacts/ and the live dogfood harness; `git diff --name-only 84201fc..HEAD -- src test script/build-native` is empty."
+  :authoritative? true
+  :note "this artifact is the exact-evidence record; prose quoting a figure is quoting this file"}
+
+ :predecessor
+ {:milestone :a3a
+  :status :accepted-and-frozen
+  :bbagent/tag "bbagent-a3a"
+  :bb4t/tag "bb4t-a3a"
+  :bbagent/commit "de281e567fc590de3d54b07cfcf44816fab18e09"
+  :bb4t/commit "5d6d01389da247e9fcc6cc0768ef0132a19da75c"
+  :tags-moved? false
+  :reverified "all 13 A3a isolation gates, 6 lifecycle gates and 4 dogfood gates re-run from the A3b image"}
+
+ :invariant
+ "A model may run the project's own commands somewhere that is not this host, and cannot say anything about where that is, what it may reach, or what it is bounded by."
+
+ :surface
+ {:operation :project/run
+  :sci/var "project/run"
+  :arguments #{:argv :cwd :timeout-ms}
+  :arguments/refused-not-ignored true
+  :effect :project/execute
+  :effect/kind :actuation
+  :profile :agent/project-execute
+  :profiles/frozen-unchanged [:agent/project-read :agent/project-survey
+                              :agent/project-develop]
+  :session/default-profile :agent/project-develop
+  :limits {:project/run-max-timeout-ms 300000
+           :project/run-max-stdout-bytes 1048576
+           :project/run-max-stderr-bytes 1048576}}
+
+ :seam
+ {:layers ["SCI project/run" "bb4t :project/run capability"
+           "bb4t.execution/ExecutionEnvironment"
+           "bbagent.executor" "bbagent.worker" "smolvm"]
+  :bb4t/knows-about-machines false
+  :protocol/functions [:-describe :-execute]
+  :resource :execution/environment
+  :project-root/supplied-by :bb4t
+  :rationale "bb4t is authoritative about which project every other operation acts on; execution is not the place to introduce a second answer"
+  :fail-closed/at :context-creation
+  :description/canonicalized-by :bb4t
+  :description/host-paths 0}
+
+ :host-policy
+ {:not-model-arguments [:project-root :tools :environment :network :cpus
+                        :memory :disk :machine-manager :mounts]
+  :tool-bundle {:selection :host :digested? true}
+  :ceilings {:worker/cpus 2 :worker/memory-mib 2048 :worker/timeout-ms 300000
+             :worker/stdout-max-bytes 1048576 :worker/stderr-max-bytes 1048576}}
+
+ :compatibility
+ {:approved-versions #{"1.7.5"}
+  :measured-by :a3a
+  :unapproved :refused
+  :override/available? true
+  :override/recorded-as :host-override
+  :claim "A3a measured one manager version; a version nobody has measured is refused rather than assumed equivalent"}
+
+ :result-semantics
+ {:statuses #{:completed :timeout :worker-failure :project-changed}
+  :exit/present-only-when-exited true
+  :timeout/has-exit? false
+  :worker-failure/has-exit? false
+  :project-changed {:process-outcome :demoted
+                    :keys [:process/status :process/exit]
+                    :input-coordinate :absent
+                    :claim "nothing can pattern-match {:status :completed :exit 0} against a run that was never anchored to one project state"}
+  :streams/rechecked-by-bb4t true}
+
+ :visibility
+ {:invariant "every project path visible to the workload is represented in the input coordinate, or is hidden from it"
+  :mechanism {:workspace :overlay-whiteout :export :tmpfs-mask}
+  :hidden-set :snapshot/excluded-paths
+  :hidden-equals-excluded? true
+  :nested-exclusions/handled? true
+  :privilege-boundary? false
+  :residual "a root workload inside the machine can `umount /input` and read the raw export; measured, gated, and claimed no more strongly than that"
+  :residual/gated-by "bbagent.worker-test/hiding-is-not-a-privilege-boundary-test"
+  :stronger-property/would-need "a host-side filtered export (hardlink mirror); out of scope for A3b"}
+
+ :authority
+ {:claim "one new operation in one new profile, and nothing else"
+  :execute-profile/grants #{:project/read :project/list :project/search
+                            :project/stat :project/edit :project/run
+                            :data/json-read :data/json-write}
+  :execute-profile/is-develop-plus-run? true
+  :default-profile/grants-run? false
+  :negative-probe/count 58
+  :negative-probe/previous 51
+  :negative-probe/added ["bb4t.execution/require" "bb4t.execution/describe"
+                         "bbagent.executor/require" "bbagent.executor/create"
+                         "bbagent.executor/approved-versions"
+                         "bbagent.bb4t/require" "bbagent.bb4t/create"]
+  :execute-profile/negative-count 20
+  :projected-class-count 0
+  :supplied-import-count 0}
+
+ :replay
+ {:new-logic-for-execution :none
+  :mechanism "A2 operation transcripts, unchanged"
+  :record :one-execution
+  :replay :zero-further-executions
+  :legacy :refused
+  :legacy/refusal :actuation-without-transcript
+  :instrument "bbagent.executor/invocation-count"
+  :claim "a recovery that reconstructed a run and also performed it would leave the same result and a different count; the count is the only thing that separates them from outside"}
+
+ :gates/native
+ {:entered-through "project/run, not bbagent.worker"
+  :describe {:executor/available? true
+             :executor/approval :recognized
+             :executor/network :none
+             :executor/coordinate "sha256:8ed0e5595ecb1640a9d7dce96d913757e063b0c46a22a4758aaf9d6a763a0ea3"
+             :note "the same coordinate the JVM computes for the same environment"}
+  :version {:version/approved-set ["1.7.5"], :version/unapproved-refused :ok, :version/override-is-recorded :ok, :version/approved-is-recognized :ok, :version/tool-bundle-required :ok, :version/no-executor-no-context :ok}
+  :authority {:authority/projected-class-count 0, :authority/supplied-import-count 0, :authority/executor-coordinate "sha256:8ed0e5595ecb1640a9d7dce96d913757e063b0c46a22a4758aaf9d6a763a0ea3", :authority/develop-plus-one :ok, :authority/grants [:data/json-read :data/json-write :project/edit :project/list :project/read :project/run :project/search :project/stat], :authority/refused-for-the-right-reason :ok, :authority/run-granted :ok, :authority/all-refused :ok, :authority/no-host-path-in-executor :ok, :authority/profile :agent/project-execute, :authority/negative-count 20}
+  :probe {:probe/exit-exact :ok, :probe/cwd-is-honoured :ok, :probe/input-coordinate-present :ok, :probe/workload-believed-it-wrote :ok, :probe/host-checkout-unchanged :ok, :probe/deadline-is-distinct :ok, :probe/network-unreachable :ok, :probe/program-chose-124 :ok, :probe/nothing-left-running :ok, :probe/host-file-unreadable :ok, :probe/excluded-paths-invisible :ok, :probe/executor-coordinate-recorded :ok, :probe/exit-zero :ok, :probe/streams-separated :ok}
+  :unstable {:unstable/status :project-changed, :unstable/not-ordinary-success :ok, :unstable/process-outcome-preserved :ok, :unstable/no-coordinate-claimed :ok, :unstable/a-later-run-is-anchored-again :ok}
+  :replay {:replay/legacy-refused :ok, :replay/executions-after-record 1, :replay/legacy-did-not-execute :ok, :replay/recorded-status :ok, :replay/executions-after-replay 1, :replay/replay-succeeded :ok, :replay/exit-restored :ok, :replay/no-second-execution :ok, :replay/one-execution :ok, :replay/result-restored :ok, :replay/executions-after-legacy 1}
+  :dogfood {:dogfood/entry-count 108, :dogfood/exit 0, :dogfood/duration-ms 1123, :dogfood/stdout "checked 26 source and 15 test files\na3a-source-check OK", :dogfood/check-passed :ok, :dogfood/composed-through-sci :ok, :dogfood/vandal-believed-it-succeeded :ok, :dogfood/host-project-intact :ok}
+  :counts {:version 5 :authority 8 :probe 14 :unstable 5 :replay 7 :dogfood 4
+           :total 43}
+  :a3a/re-run {:probe 13 :lifecycle 6 :dogfood 4 :all :ok
+               :note "A3a's own gates re-run unchanged from the A3b image"}}
+
+ :suites
+ {:bbagent {:tests 217 :assertions 1419 :failures 0 :errors 0}
+  :bb4t {:tests 25 :assertions 199 :failures 0 :errors 0}
+  :execution-specific {:tests 30 :assertions 99}
+  :pty {:gates 37 :passed 37}}
+
+ :image
+ {:sha256 "9b4f5b2120f74d64addbe35b61b571d370bd8610843a032f67325bcd09861f1c"
+  :bytes 76876032
+  :graalvm "Oracle GraalVM 25.2.4+7.1 (build 25.0.4+7-LTS-jvmci-25.2-b20)"
+  :machine-manager "smolvm 1.7.5"
+  :tool-bundle "babashka v1.13.219"
+  :new-reachability-metadata :none
+  :new-build-flag :none
+  :new-dependency :none}
+ :dogfood/live
+ {:profile :agent/project-execute
+  :model "Qwen3.6-27B (local, OpenAI-compatible endpoint)"
+  :task "the project's own check fails; work out how it is verified, fix what it reports, and run the check to confirm"
+  :fixture "nothing states the required value or the command except the check itself, so the task cannot be completed without reading it"
+  :arms
+  {:verify
+   {:status :finished
+    :repl/attempts 14
+    :used-edit? true :used-run? true
+    :run/calls 3 :run/executed 2 :run/refused-before-executor 1
+    :statuses [:completed :completed] :exits [1 0]
+    :every-executed-run-anchored? true
+    :distinct-input-coordinates 2
+    :saw-a-passing-check? true
+    :project/fixed? true
+    :executor/invocations 2
+    :trace "explored; read the check and the source; called project/run with :timeout, which was refused before reaching the executor; called (doc project/run); re-ran and got exit 1 with FAIL ... found 7; offered a whole file as :base and was refused; called project/stat; edited anchored to the digest; re-ran and got exit 0 with 'quarry check OK: spacing 9'"
+    :note "the refused call never reached the execution environment, which is why :run/calls exceeds :executor/invocations"}
+   :resume
+   {:status :finished
+    :repl/attempts 10
+    :used-edit? true :used-run? true
+    :run/executed 1 :exits [0]
+    :every-executed-run-anchored? true
+    :executor/invocations-after-turn 1
+    :executor/invocations-after-resume 1
+    :no-second-execution? true
+    :replay {:forms 10 :reconstructed 10 :legacy 0 :reobserved [] :exact? true}
+    :claim "a live session that edited and verified its own work was thrown away and rebuilt from its durable events; every form reconstructed, nothing re-observed, and the execution environment was not touched"}
+   :unstable
+   {:status :finished
+    :repl/attempts 13
+    :used-edit? true :used-run? true
+    :run/executed 2
+    :statuses [:project-changed :project-changed]
+    :exits [nil nil]
+    :distinct-input-coordinates 0
+    :saw-project-changed? true
+    :unanchored-runs-carry-no-coordinate? true
+    :method "the host rewrote a file in the project every 400ms for the whole turn, rather than once at a guessed moment"
+    :claim "the model was told its result was not anchored rather than being handed an apparent success, and still completed the task"}}
+  :harness/defect
+  "the first live run's fixture generated an unmatchable regex, so its check could not pass; the model diagnosed that by running bb -e through project/run rather than concluding its own edit had failed. Recorded in docs/A3B_FINDINGS.md section 10b; the run reported here is the corrected one."
+  :raw "artifacts/a3b-dogfood-runs.edn"}
+
+ :nonclaims
+ ["hiding excluded paths is not a privilege boundary; the machine is the boundary"
+  "one manager version is approved because one has been measured, not because others are worse"
+  "the overlay's lower layer is still live; A3b detects movement and does not prevent it"
+  ":cwd is validated lexically, against the workspace it will be resolved in rather than against this tree"
+  "the tool bundle is trusted, not verified; its digest says which bytes ran, not that they are benign"]
+
+ :exclusions
+ ["project/test" "project/build" "project/lint" "host tool vocabulary"
+  "generic shell" "background processes" "dev-server lifecycle" "Git tooling"
+  "network enablement" "package-installation policy" "memory" "skills"
+  "subagents" "SCI Extension Manager"]}

@@ -59,7 +59,7 @@
            (str ";; Verifies the lattice invariants.\n"
                 "(def lattice (slurp \"src/quarry/lattice.clj\"))\n\n"
                 "(def spacing\n"
-                "  (some-> (re-find #\"\\\\(def spacing (\\\\d+)\\\\)\" lattice)\n"
+                "  (some-> (re-find #\"\\(def spacing (\\d+)\\)\" lattice)\n"
                 "          second parse-long))\n\n"
                 "(when-not (= 9 spacing)\n"
                 "  (println (str \"FAIL: lattice spacing must be 9 for the \"\n"
@@ -84,10 +84,14 @@
             requests (filter #(= :repl/request (:event/type %)) events)
             results (filter #(= :repl/result (:event/type %)) events)
             sources (mapv :repl/source requests)
+            ;; Read from the operation receipts, not from what the form
+            ;; evaluated to.  A model that writes (def r (project/run ...))
+            ;; leaves a Var as the value and the receipt as the only place
+            ;; the result itself survives.
             run-results (into []
-                              (comp (map #(get-in % [:repl/result :value :value/data]))
-                                    (filter #(and (map? %)
-                                                  (contains? % :worker/disposition))))
+                              (comp (mapcat :repl/operations)
+                                    (filter #(= :project/run (:operation/id %)))
+                                    (map :result))
                               results)]
         {:repl/attempts (count requests)
          :repl/errors (count (filter #(= :error (get-in % [:repl/result :status]))
@@ -158,8 +162,20 @@
                                  (str/includes? (str (:stdout %))
                                                 "quarry check OK"))
                            runs))
-            :every-run-anchored?
-            (and (seq runs) (every? :project/input-coordinate runs))})))
+            ;; Only runs that actually executed can carry a coordinate. A
+            ;; call refused before it reached the executor -- the first live
+            ;; run spent one on :timeout instead of :timeout-ms -- leaves a
+            ;; receipt with no result, and counting that as an unanchored run
+            ;; said the product had done something it had not.
+            :run/calls (count runs)
+            :run/executed (count (filter :status runs))
+            :run/refused-before-executor (count (remove :status runs))
+            :every-executed-run-anchored?
+            (let [executed (filter :status runs)]
+              (and (seq executed)
+                   (every? #(or (= :project-changed (:status %))
+                                (string? (:project/input-coordinate %)))
+                           executed)))})))
 
 (defn- resume-arm! [settings]
   (let [project-root (fixture! "resume")
