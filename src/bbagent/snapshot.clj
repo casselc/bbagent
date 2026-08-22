@@ -41,18 +41,28 @@
     (.isRegularFile attributes) :file
     :else :other))
 
-(defn- escaping-symlink?
-  "Whether a link's target names something outside the project tree.
+(defn- unrepresentable-symlink
+  "Why a link cannot be carried into a worker faithfully, or nil.
 
-   Such a link is refused rather than recorded.  The worker resolves it
-   inside its own filesystem, where the same name means something else, so
-   the manifest would be describing a file the worker never sees."
+   A worker resolves a link inside its own filesystem, not the host's, so a
+   link is only faithful when the same name means the same file on both
+   sides.
+
+   `:absolute` covers every absolute target, including one that lexically
+   lies under the project root.  `/home/me/project/lib/foo` is not
+   `/work/lib/foo`: the worker would resolve it against a path that does not
+   exist there.  Such a link cannot escape anywhere — it lands in the
+   machine's own filesystem — but it is not the project the manifest
+   describes, and A3a refuses to describe a tree it is not handing over.
+
+   `:escaping` covers a relative target that climbs out of the tree.  Its
+   resolution inside the worker is equally not what the host has."
   [^Path root ^Path link]
-  (let [target (Files/readSymbolicLink link)
-        resolved (.normalize (if (.isAbsolute target)
-                               target
-                               (.resolve (.getParent link) target)))]
-    (not (.startsWith resolved root))))
+  (let [target (Files/readSymbolicLink link)]
+    (cond
+      (.isAbsolute target) :absolute
+      (not (.startsWith (.normalize (.resolve (.getParent link) target)) root))
+      :escaping)))
 
 (defn- children
   "The immediate entries of a directory, as a vector."
@@ -78,12 +88,6 @@
         {:entries entries :bytes total-bytes}
         (let [^Path child (peek pending)
               pending (pop pending)]
-          (when (> (count entries) max-entries)
-            (fail! "Project input exceeds the snapshot entry limit"
-                   {:snapshot/max-entries max-entries}))
-          (when (> total-bytes max-bytes)
-            (fail! "Project input exceeds the snapshot byte limit"
-                   {:snapshot/max-bytes max-bytes}))
           (if (contains? exclusions (str (.getFileName child)))
             (recur pending entries total-bytes)
             (let [relative (str (.relativize root child))
@@ -94,15 +98,31 @@
                   ^BasicFileAttributes attributes
                   (Files/readAttributes child BasicFileAttributes no-follow)
                   kind (entry-kind attributes)]
+              ;; Checked before the entry is added rather than at the top of
+              ;; the next iteration.  The looser form let a terminal entry
+              ;; land one past the stated maximum, because nothing came
+              ;; after it to notice.
+              (when (>= (count entries) max-entries)
+                (fail! "Project input exceeds the snapshot entry limit"
+                       {:snapshot/max-entries max-entries
+                        :snapshot/path relative}))
               (case kind
                 :symlink
                 (do
-                  (when (escaping-symlink? root child)
-                    (fail! (str "Project input contains a symbolic link "
-                                "pointing outside the project root; the "
-                                "worker cannot be given a faithful copy of "
-                                "this tree")
-                           {:snapshot/path relative}))
+                  (when-let [reason (unrepresentable-symlink root child)]
+                    (fail! (if (= :absolute reason)
+                             (str "Project input contains an absolute "
+                                  "symbolic link; the worker resolves an "
+                                  "absolute path inside its own filesystem, "
+                                  "where it names something else, so this "
+                                  "tree cannot be handed over faithfully")
+                             (str "Project input contains a symbolic link "
+                                  "pointing outside the project root; the "
+                                  "worker cannot be given a faithful copy of "
+                                  "this tree"))
+                           {:snapshot/path relative
+                            :snapshot/symlink reason
+                            :snapshot/target (str (Files/readSymbolicLink child))}))
                   (recur pending
                          (conj entries
                                {:path relative
@@ -117,6 +137,10 @@
 
                 :file
                 (let [bytes (.size attributes)]
+                  (when (> (+ total-bytes bytes) max-bytes)
+                    (fail! "Project input exceeds the snapshot byte limit"
+                           {:snapshot/max-bytes max-bytes
+                            :snapshot/path relative}))
                   (recur pending
                          (conj entries
                                {:path relative

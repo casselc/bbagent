@@ -114,32 +114,69 @@
       (testing "the link is not digested as a copy of its target"
         (is (nil? (:digest link)))))))
 
-(deftest an-escaping-symlink-fails-closed-test
-  (testing "an absolute link out of the tree"
-    (let [root (temp-root "escape-absolute")]
-      (spit! root "a.txt" "content")
-      (link! root "escape" "/etc/passwd")
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"pointing outside the project root"
-                            (snapshot/manifest root)))))
+(deftest an-unrepresentable-symlink-fails-closed-test
   (testing "a relative link that climbs out of the tree"
     (let [root (temp-root "escape-relative")]
       (spit! root "src/a.txt" "content")
       (link! root "src/escape" "../../elsewhere")
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"pointing outside the project root"
-                            (snapshot/manifest root))))))
+                            (snapshot/manifest root)))))
+  (testing "an absolute link out of the tree"
+    (let [root (temp-root "absolute-outside")]
+      (spit! root "a.txt" "content")
+      (link! root "escape" "/etc/passwd")
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"absolute symbolic link"
+                            (snapshot/manifest root)))))
+  (testing "an absolute link that does lie under the project root"
+    ;; It cannot escape: a worker resolves it inside its own filesystem.
+    ;; It is still refused, because /host/project/a.txt is not /work/a.txt
+    ;; and the manifest would describe a tree that is not handed over.
+    (let [root (temp-root "absolute-inside")]
+      (spit! root "a.txt" "content")
+      (link! root "inside" (str root "/a.txt"))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"absolute symbolic link"
+                            (snapshot/manifest root)))))
+  (testing "the refusal says which link and what it pointed at"
+    (let [root (temp-root "symlink-data")]
+      (spit! root "a.txt" "content")
+      (link! root "escape" "/etc/passwd")
+      (let [data (try (snapshot/manifest root)
+                      (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
+        (is (= :snapshot-invalid (:bbagent/error data)))
+        (is (= :absolute (:snapshot/symlink data)))
+        (is (= "escape" (:snapshot/path data)))
+        (is (= "/etc/passwd" (:snapshot/target data)))))))
 
-(deftest an-oversized-input-fails-closed-test
+(deftest the-snapshot-limits-are-exact-test
+  ;; The limits are a maximum, not an approximate one.  A check that ran at
+  ;; the top of the next iteration let the final entry land one past the
+  ;; stated bound, because nothing came after it to notice.
   (let [root (temp-root "bounds")]
-    (doseq [n (range 12)]
-      (spit! root (str "f" n ".txt") "x"))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"exceeds the snapshot entry limit"
-                          (snapshot/manifest root {:limits {:snapshot/max-entries 3}})))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"exceeds the snapshot byte limit"
-                          (snapshot/manifest root {:limits {:snapshot/max-bytes 2}})))))
+    (doseq [n (range 4)]
+      (spit! root (str "f" n ".txt") "xy"))
+    (testing "entries: the exact count is allowed and one fewer is refused"
+      (is (= 4 (:snapshot/entry-count
+                (snapshot/manifest root {:limits {:snapshot/max-entries 4}}))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"exceeds the snapshot entry limit"
+                            (snapshot/manifest
+                             root {:limits {:snapshot/max-entries 3}}))))
+    (testing "bytes: the exact total is allowed and one fewer is refused"
+      (is (= 8 (:snapshot/bytes
+                (snapshot/manifest root {:limits {:snapshot/max-bytes 8}}))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"exceeds the snapshot byte limit"
+                            (snapshot/manifest
+                             root {:limits {:snapshot/max-bytes 7}}))))
+    (testing "the refusal names the entry that crossed the line"
+      (let [data (try (snapshot/manifest root {:limits {:snapshot/max-entries 2}})
+                      (catch clojure.lang.ExceptionInfo failure
+                        (ex-data failure)))]
+        (is (= 2 (:snapshot/max-entries data)))
+        (is (string? (:snapshot/path data)))))))
 
 (deftest a-missing-root-fails-closed-test
   (is (thrown-with-msg? clojure.lang.ExceptionInfo

@@ -307,14 +307,14 @@
     (is (false? (:project/input-stable? result)))
     (is (not (contains? result :project/input-coordinate)))))
 
-(deftest an-escaping-symlink-stops-the-execution-test
+(deftest an-unrepresentable-symlink-stops-the-execution-test
   (let [root (project! "symlink" {"src/a.txt" "content"})]
     (Files/createSymbolicLink
      (.toPath (io/file root "escape"))
      (.toPath (io/file "/etc/passwd"))
      (make-array FileAttribute 0))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"pointing outside the project root"
+                          #"absolute symbolic link"
                           (run!! root (shell "true"))))))
 
 (deftest an-execution-reports-what-it-did-without-reporting-secrets-test
