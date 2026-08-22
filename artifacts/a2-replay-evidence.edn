@@ -5,9 +5,13 @@
 
  :coordinate
  {:bb4t/commit "cc18ca7b4d6bcb9ff4d4303417d6d94a6616875a"
-  :bbagent/commit "c23b31634785d44816e8a0163291553aeba8b807"
+  :bbagent/commit "542eafe4541570e832b2ffc7823c44e9dd5c0a28"
+  :bb4t/tag "bb4t-a2"
+  :bbagent/tag "bbagent-a2"
   :builder "script/build-native"
-  :note "built at c23b3163; commits after it change only docs/, artifacts/ and script/a2-live-replay.clj, so the image matches the runtime source a reviewer reads"}
+  :builder/commit "542eafe4541570e832b2ffc7823c44e9dd5c0a28"
+  :status :accepted-and-frozen
+  :note "rebuilt from the accepted coordinates themselves; builder, source and evidence are one commit, so nothing here describes an earlier runtime plus later explanatory commits"}
 
  :invariant
  "Recovery reconstructs historical computational state without re-observing or re-actuating the external world."
@@ -45,11 +49,12 @@
  :image
  {:path "dist/bbagent"
   :bytes 75565312
-  :sha256 "0f3adc37176d2e249b135157802eca6d258b6bbab72d029ec4a7f5d1d50cbc8d"
+  :sha256 "b8026d17685d44551b2c077730fdac96dc2a70408fb7199b2080d0b85ed58bd4"
   :platform {:os "Ubuntu" :arch "x86_64" :libc "glibc"}
-  :toolchain {:graalvm "Oracle GraalVM 25.0.4+7.1" :java "25.0.4"}
+  :toolchain {:graalvm "Oracle GraalVM 25.2.4+7.1" :java "25.0.4"}
   :native-image-additions :none
-  :note "the repair added no reachability metadata, no build flag, and no dependency"}
+  :note "the repair added no reachability metadata, no build flag, and no dependency"
+  :reproducibility "native-image is not reproducible; this digest identifies this artifact and differs from the digest recorded before the freeze rebuild, from identical source"}
 
  :authority
  {:context/grants #{:project/read :project/list :project/search :project/stat
@@ -122,4 +127,5 @@
   "one model, one endpoint, one live repetition; the live scenario is a demonstration that the path works end to end, not a measurement"
   "Linux x86_64 glibc only; no cross-platform or static-linking claim"
   "the image digest is an artifact identifier, not a reproducibility claim"
-  "no JVM/native suite parity; the native evidence is the smoke, the authority corpus and the PTY gates"]}
+  "no JVM/native suite parity; the native evidence is the smoke, the authority corpus and the PTY gates"
+  "A3a later raised the authority negative corpus to 51; the 35 recorded here is what A2 was measured with and is not restated"]}
