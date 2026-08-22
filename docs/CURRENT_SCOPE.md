@@ -73,7 +73,7 @@ architecture are not redesigned.
 ### Stop gate
 
 Stop after A3a findings and fresh review. Do not begin A3b automatically;
-`docs/A3A_FINDINGS.md` section 7 recommends it, including that it needs a new
+`docs/A3A_FINDINGS.md` section 8 recommends it, including that it needs a new
 `:agent/project-execute` profile rather than a widened A2 one.
 
 ---

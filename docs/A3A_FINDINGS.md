@@ -42,13 +42,14 @@ the layer absorbing the writes lives and dies inside the machine.
 
 | Evidence | Result |
 |---|---|
-| bbagent deterministic suite | 181 tests, 1275 assertions, 0 failures |
+| bbagent deterministic suite | 184 tests, 1293 assertions, 0 failures |
 | bb4t deterministic suite | 25 tests, 198 assertions, 0 failures |
-| A3a isolation and bounds, natively | 13 gates |
-| A3a lifecycle, natively | 6 gates |
-| A3a dogfood, natively | 4 gates, against the built checkout |
+| Native image | built at bb4t `5d6d0138` / bbagent `ac50797`; builder, source and image are one commit |
+| A3a isolation and bounds, natively | 13 gates, all pass |
+| A3a lifecycle, natively | 6 gates, all pass |
+| A3a dogfood, natively | 4 gates, against the checkout the image was built from |
 | Authority | 51 negative probes denied, `:projected-class-count 0`, `:supplied-import-count 0` |
-| A2 regression | all A2 gates still pass in the same image |
+| A2 regression, same image | every A2 native gate passes, and 37/37 PTY gates |
 
 ### Two results that had to be measured
 
@@ -86,7 +87,7 @@ implementation. They are the substance of this milestone.
    a project that moved; it does not prevent the workload from having seen the
    move. For a single-player agent whose only other writer is its own serialized
    `project/edit`, this was judged sufficient.
-4. **Should A3b expose `project/run`?** Section 7 recommends it, with a new
+4. **Should A3b expose `project/run`?** Section 8 recommends it, with a new
    profile rather than a widened A2 one.
 
 ---
@@ -193,7 +194,7 @@ The reaping proof is a workload that appends to a host-visible file five times a
 second while its foreground command sleeps. At the deadline the file had grown;
 four seconds later it had not grown further, and no machine was running.
 
-## 4a. Resource bounds, and what each claim rests on
+## 5. Resource bounds, and what each claim rests on
 
 | Bound | Status |
 |---|---|
@@ -211,7 +212,7 @@ hole — both are bounded transitively by the wall-clock deadline and by machine
 teardown — but neither is independently enforced, and the findings do not claim
 they are.
 
-## 5. What a result says
+## 6. What a result says
 
 ```clojure
 {:status :completed          ; or :timeout, :worker-failure
@@ -236,7 +237,7 @@ quiet flag, so its progress line was being reported as something the workload
 wrote. It is removed, and its bytes removed from the count, so both describe the
 workload alone.
 
-## 6. Dogfood
+## 7. Dogfood
 
 The target is the bbagent repository itself, and the command is
 `bb script/a3a-source-check.clj` — a babashka script the project keeps, checking
@@ -262,7 +263,7 @@ host checkout's input coordinate was unchanged, `src/bbagent/worker.clj` was
 still present, `WORKER-WAS-HERE.txt` did not exist, and `git status` was
 byte-identical to before the run.
 
-## 7. Recommendation for A3b
+## 8. Recommendation for A3b
 
 Expose one primitive, not a vocabulary:
 
@@ -287,14 +288,37 @@ A2's machinery will then refuse to re-run it during recovery, so
 
 resumes from its receipt rather than re-executing. A2 already fails closed on an
 actuation without a receipt, so an A3b operation inherits the right behaviour by
-being classified rather than by new recovery code. The result shape in section 5
+being classified rather than by new recovery code. The result shape in section 6
 is already inert data suitable for a receipt.
 
-## 8. Blockers
+## 9. A2, accepted and frozen
+
+A2 was re-verified before A3a began, not taken on the record.
+
+| Check | Result |
+|---|---|
+| bbagent suite at `bbagent-a2` | 149 tests, 1170 assertions, 0 failures |
+| bb4t suite at `bb4t-a2` | 25 tests, 198 assertions, 0 failures |
+| Native build from the tags themselves | every gate passes, including the 35 authority negatives A2 was measured with |
+| PTY proof | 37/37 |
+
+The tags stay where they are. `artifacts/a2-replay-evidence.edn` previously
+recorded an image built one commit before the accepted `bbagent-a2`; the delta
+was docs and artifacts only, so the claim was true, but a reviewer had to check
+the argument rather than read a coordinate. The image was rebuilt from the tags,
+so builder, source and evidence are now one commit. `script/build-native`'s own
+default coordinates were a pre-A2 pair nobody could have reproduced from; they
+now name the frozen pair.
+
+Both A2 profiles are marked frozen in `bb4t.catalog`. A capability added after
+A2 gets a new profile rather than widening one underneath recorded coordinates —
+which is exactly what section 8 recommends for A3b.
+
+## 10. Blockers
 
 None.
 
-## 9. Nonclaims
+## 11. Nonclaims
 
 - Linux x86_64 with KVM only. No claim about macOS, Windows, aarch64, or a host
   without `/dev/kvm`.

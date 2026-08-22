@@ -1,0 +1,164 @@
+{:milestone :a3a
+ :evidence :isolated-project-execution
+ :result :pass
+ :question "Can trusted host code execute arbitrary project-owned code in a hard-bounded worker, obtain structured results, terminate it reliably, and prove the execution cannot escape into the authoritative project, host secrets, or ambient network?"
+
+ :coordinate
+ {:bb4t/commit "5d6d01389da247e9fcc6cc0768ef0132a19da75c"
+  :bbagent/commit "ac507976864bd0e35b98d71395eef5e40a56d91f"
+  :builder "script/build-native"
+  :builder/commit "ac507976864bd0e35b98d71395eef5e40a56d91f"
+  :note "builder, source and image are one commit; only this artifact lands after it"}
+
+ :predecessor
+ {:milestone :a2
+  :status :accepted-and-frozen
+  :bb4t/tag "bb4t-a2"
+  :bbagent/tag "bbagent-a2"
+  :bb4t/commit "cc18ca7b4d6bcb9ff4d4303417d6d94a6616875a"
+  :bbagent/commit "542eafe4541570e832b2ffc7823c44e9dd5c0a28"
+  :reverified "both suites, a full native build at the frozen coordinates, and 37/37 PTY gates"
+  :tags-moved? false
+  :profiles-frozen "bb4t.catalog now marks :agent/project-survey and :agent/project-develop frozen"}
+
+ :invariant
+ "Project-owned code may do anything it likes to its own workspace and cannot reach the authoritative project, the host environment, or the network."
+
+ :authority
+ {:claim "A3a adds execution reachability to the trusted image and no authority to the model"
+  :context/grants #{:project/read :project/list :project/search :project/stat
+                    :project/edit :data/json-write :data/json-read}
+  :projected-class-count 0
+  :supplied-import-count 0
+  :negative-probe/count 51
+  :negative-probe/added 16
+  :added-negatives ["bbagent.worker/require" "bbagent.worker/execute!"
+                    "bbagent.worker/describe" "bbagent.process/require"
+                    "bbagent.process/execute!" "bbagent.snapshot/require"
+                    "bbagent.snapshot/manifest" "java.lang.ProcessBuilder"
+                    "java.lang.ProcessBuilder/start" "java.lang.Runtime"
+                    "java.lang.Runtime/getRuntime" "java.lang.ProcessHandle"
+                    "clojure.java.shell/require" "project/run" "process/run"
+                    "smolvm/run"]}
+
+ :implementation
+ {:primitive "bbagent.process: deadline, output budgets, and a reaped process tree"
+  :snapshot "bbagent.snapshot: project input manifest and :project/input coordinate"
+  :seam "bbagent.worker: the only namespace naming the machine manager"
+  :native-phases "bbagent.a3a-smoke, driven by bbagent a3a-worker-smoke --phase"
+  :native-image-additions :none
+  :note "bbagent.coordinates already compiled a ProcessBuilder into the image, so A3a added no reachability metadata, build flag, or dependency"}
+
+ :topology
+ {:project-mount "read-only"
+  :workspace "overlayfs; lower is the read-only project, upper and work on the machine's own disk"
+  :lifecycle "one ephemeral machine per execution, destroyed on exit"
+  :host-writable-surface :none
+  :rationale "isolation is a property of the mount flag, not of cleanup discipline; reuse cannot be got wrong because there is no reuse"}
+
+ :measurement/workspace
+ {:tree {:bytes 283000000 :files 4001}
+  :boot-only-ms 519
+  :copy-total-ms 2698
+  :overlay-total-ms 884
+  :claim "copying scales with tree size and mounting does not; the overlay figure includes a full traversal of the merged tree"
+  :rejected-design "copying into the machine also lands in a 2 GiB root overlay, so a large worktree would have hit ENOSPC"}
+
+ :measurement/teardown
+ {:sigkill-front-end {:machine :running :orphan-process "_boot-vm" :rss-bytes 281140000}
+  :sigterm-front-end {:machine :running :orphan-process "_boot-vm"}
+  :descendant-reap {:machine :gone :host-processes :none :workload :stopped}
+  :claim "killing the manager process is not cleanup; destroying its descendants is"
+  :ordering "descendants are collected before the parent is destroyed, because a dead parent has none to enumerate"}
+
+ :gates/native
+ {:describe {:worker/available? true
+             :note "verified rather than inferred: the existing ProcessBuilder use swallows Throwable, so a broken image would have looked like a project that is not a git repository"}
+  :probe {:count 13 :passed 13
+          :gates [:probe/exit-zero :probe/exit-exact :probe/streams-separated
+                  :probe/workload-believed-it-wrote :probe/host-project-unchanged
+                  :probe/host-file-unreadable :probe/network-unreachable
+                  :probe/environment-constructed :probe/stdout-bounded
+                  :probe/duration-reported :probe/coordinate-stable
+                  :probe/coordinate-sensitive :probe/uncommitted-work-visible]}
+  :timeout {:count 6 :passed 6 :tick-count 27
+            :gates [:timeout/program-chose-124 :timeout/deadline-is-distinct
+                    :timeout/disposition-terminated :timeout/workload-was-running
+                    :timeout/in-machine-child-stopped :timeout/nothing-left-running]}
+  :dogfood {:count 4 :passed 4}
+  :a2-regression {:native-gates :all-pass :pty {:gates 37 :passed 37}}}
+
+ :dogfood
+ {:project "the bbagent checkout the image was built from"
+  :argv ["bb" "script/a3a-source-check.clj"]
+  :entry-count 102
+  :bytes 855074
+  :input-coordinate "sha256:f37ced7a084bcd6c3e04d019d396840508fece34ff13e0956b661d73524e9100"
+  :exit 0
+  :duration-ms 1095
+  :stdout "checked 24 source and 14 test files\na3a-source-check OK"
+  :check "namespace/path agreement, and that every test namespace is registered in the runner"
+  :check/real? true
+  :check/note "the second invariant was violated by this repository while A3a was written; two new test namespaces passed in isolation and were not in clojure -M:test"
+  :vandal {:argv "rm -rf src/bbagent; overwrite README.md; create WORKER-WAS-HERE.txt"
+           :believed-success? true
+           :host-input-coordinate :unchanged
+           :host-worker.clj-present? true
+           :host-worker-was-here.txt-present? false}
+  :why-babashka "no project dependencies and no network, so the worker runs it against the real working tree with nothing mounted but the project and one static binary"}
+
+ :bounds
+ {:wall-clock :proven-by-adversarial-test
+  :captured-output :proven-by-test
+  :host-filesystem-writes :proven-by-adversarial-test
+  :network-egress :proven-by-test-from-inside
+  :machine-memory :configured
+  :disk :configured
+  :cpu :not-independently-bounded
+  :process-count :not-measured}
+
+ :image
+ {:path "dist/bbagent"
+  :bytes 76155136
+  :sha256 "51938fec19ffe2f23bfc1d64806eaba201e33ffa126a9af78aee75af54d32303"
+  :platform {:os "Ubuntu" :arch "x86_64" :libc "glibc"
+             :kernel "Linux 7.0.0-29-generic" :hypervisor "KVM"}
+  :toolchain {:graalvm "Oracle GraalVM 25.2.4+7.1" :java "25.0.4"}
+  :reproducibility "native-image is not reproducible; this digest identifies this artifact"}
+
+ :dependencies
+ {:machine-manager "smolvm 1.7.5"
+  :guest "Alpine Linux 3.19.0, kernel 6.12.95"
+  :dogfood-interpreter "babashka v1.13.219"
+  :note "the machine manager is external and at a specific version; its behaviour was measured, not proven, and the reaping depends on its process-tree shape"}
+
+ :suites
+ {:bbagent {:tests 184 :assertions 1293 :failures 0 :errors 0}
+  :bb4t {:tests 25 :assertions 198 :failures 0 :errors 0}}
+
+ :defects-found
+ ["killing the machine manager orphans the machine, which keeps running and consuming CPU; the process primitive now reaps descendants first"
+  "the overlay lower layer is the live host tree, so a concurrent host write is visible to the workload and can produce a torn read; a run whose project moved reports no input coordinate"
+  "an unhinted .size on BasicFileAttributes resolved reflectively, passing every JVM test and failing in the native image on the first native gate run"
+  "the machine manager writes a progress banner to stderr and has no quiet flag, so it was being reported as workload output; it is removed and its bytes removed from the count"
+  "overlayfs refuses an overlayfs upperdir, which the machine's own root is; the upper lives on the machine's ext4 disk"]
+
+ :nonclaims
+ ["Linux x86_64 with KVM only; no claim about macOS, Windows, aarch64, or a host without /dev/kvm"
+  "the dogfood is a babashka project check, not bbagent's own JVM suite; running that would need a JDK and ~/.m2 mounted read-only, which was not done"
+  "CPU is configured, not independently bounded: a machine gets a vCPU count, not a share or quota"
+  "process count inside a machine is not bounded or measured"
+  "the input coordinate detects that a project moved under a run; it does not prevent the workload from having seen the move, and it is not a transaction"
+  "isolation rests on the hypervisor and on the read-only mount; no claim about a malicious guest kernel, container equivalence, or multi-tenant security"
+  "truncating a stream at a byte budget can split a UTF-8 sequence, so kept text may end in a replacement character; the reported byte count is unaffected"
+  "no claim about package installation, long-running services, or background processes; A3a runs one command to completion or to its deadline"
+  "the image digest is an artifact identifier, not a reproducibility claim"]
+
+ :recommendation
+ {:next :a3b
+  :surface "(project/run {:argv [...] :cwd \".\" :timeout-ms N})"
+  :not "project/test or project/build; those are project-specific procedures that should compose in SCI over a primitive"
+  :profile :agent/project-execute
+  :profile/note "a new profile, not a widened :agent/project-develop, which is now frozen"
+  :effect :actuation
+  :effect/note "classified in bb4t.catalog/effects, so A2's recovery machinery refuses to re-run it and a bound result resumes from its receipt without new recovery code"}}
