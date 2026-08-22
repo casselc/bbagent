@@ -1,6 +1,7 @@
 (ns bbagent.test-runner
   (:require [bbagent.agent-test]
             [bbagent.coordinates-test]
+            [bbagent.execution-test]
             [bbagent.integration-test]
             [bbagent.journal-test]
              [bbagent.orientation-test]
@@ -19,6 +20,7 @@
   (let [{:keys [fail error]}
         (test/run-tests 'bbagent.agent-test
                         'bbagent.coordinates-test
+                        'bbagent.execution-test
                         'bbagent.integration-test
                         'bbagent.journal-test
                         'bbagent.orientation-test

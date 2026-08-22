@@ -3,6 +3,7 @@
             [bbagent.orientation :as orientation]
             [bbagent.provider :as provider]
             [bbagent.a3a-smoke :as a3a-smoke]
+            [bbagent.a3b-smoke :as a3b-smoke]
             [bbagent.worker :as worker]
             [bbagent.s0b-smoke :as s0b-smoke]
             [bbagent.session :as session]
@@ -84,6 +85,20 @@
                                   :message (.getMessage failure)})))))
           (recur))))))
 
+(defn- executor-options
+  "The trusted host settings an executing profile runs under.
+
+   Host configuration, never a model argument.  The tool bundle in
+   particular: an execution capability that let its caller name a host
+   directory to mount would be a way to read the host wearing an execution
+   capability's clothes, whatever the machine boundary did afterwards."
+  [options]
+  {:tools (or (:tools options)
+              (System/getenv "BBAGENT_EXECUTOR_TOOLS"))
+   :allow-unapproved-version?
+   (true-value? (or (:allow-unapproved-worker options)
+                    (System/getenv "BBAGENT_EXECUTOR_ALLOW_UNAPPROVED")))})
+
 (defn- tui-command
   "Opens or resumes a session through the ordinary application seams and
    hands the live AgentSession to the TUI.  The TUI never opens a store or
@@ -104,6 +119,7 @@
                               :system-prompt (system-prompt options)
                               :store-backend backend
                               :orientation (:orientation options)
+                              :executor (executor-options options)
                               :profile (some-> (:profile options) keyword)}))
           (session/start! {:state-root (state-root options)
                            :project-root (or (:project options) ".")
@@ -111,6 +127,7 @@
                            :system-prompt (system-prompt options)
                            :store-backend backend
                            :orientation (:orientation options)
+                           :executor (executor-options options)
                               :profile (some-> (:profile options) keyword)}))]
     (try
       (tui/start!
@@ -135,6 +152,7 @@
                          :system-prompt (system-prompt options)
                          :store-backend (:store options)
                          :orientation (:orientation options)
+                         :executor (executor-options options)
                               :profile (some-> (:profile options) keyword)})]
     (try (interactive! agent-session)
          (finally (session/close! agent-session :operator-exit)))))
@@ -152,6 +170,7 @@
                           :system-prompt (system-prompt options)
                           :store-backend (:store options)
                           :orientation (:orientation options)
+                          :executor (executor-options options)
                               :profile (some-> (:profile options) keyword)})]
     (try (interactive! agent-session)
          (finally (session/close! agent-session :operator-exit)))))
@@ -257,6 +276,34 @@
       "describe" (prn (worker/describe))
       (throw (ex-info "A3a smoke requires a known --phase" {:phase phase})))))
 
+(defn- a3b-smoke-command [options]
+  (let [unknown (seq (remove #{:arguments :phase :project :sentinel :tools}
+                             (keys options)))
+        phase (:phase options)
+        settings {:project-root (:project options)
+                  :tools (:tools options)
+                  :outside-sentinel (:sentinel options)}]
+    (when unknown
+      (throw (ex-info "Unknown A3b smoke options" {:options (vec unknown)})))
+    (when (seq (:arguments options))
+      (throw (ex-info "A3b smoke does not accept positional arguments" {})))
+    (when-not (:project options)
+      (throw (ex-info "A3b smoke requires --project PATH" {})))
+    (when-not (:tools options)
+      (throw (ex-info "A3b smoke requires --tools PATH" {})))
+    (case phase
+      "describe" (prn (a3b-smoke/describe! settings))
+      "version" (prn (a3b-smoke/version! settings))
+      "authority" (prn (a3b-smoke/authority! settings))
+      "probe" (do
+                (when-not (:sentinel options)
+                  (throw (ex-info "A3b probe requires --sentinel PATH" {})))
+                (prn (a3b-smoke/probe! settings)))
+      "unstable" (prn (a3b-smoke/unstable! settings))
+      "replay" (prn (a3b-smoke/replay! settings))
+      "dogfood" (prn (a3b-smoke/dogfood! settings))
+      (throw (ex-info "A3b smoke requires a known --phase" {:phase phase})))))
+
 (defn- usage []
   (str "bbagent tui [SESSION_ID] [--project PATH] [--store file|sqlite]\n"
        "bbagent run [--project PATH] [--store file|sqlite] [provider options]\n"
@@ -265,11 +312,17 @@
         "bbagent inspect SESSION_ID [--state PATH] [--store file|sqlite]\n"
         "bbagent s0a-sqlite-smoke --database PATH --project PATH\n"
         "bbagent s0b-native-smoke --phase PHASE --state PATH --session ID [--project PATH]\n"
-       "--profile agent/project-read|agent/project-survey|agent/project-develop\n"
+        "bbagent a3a-worker-smoke --phase PHASE --project PATH [--tools PATH]\n"
+        "bbagent a3b-execute-smoke --phase PHASE --project PATH --tools PATH\n"
+       "--profile agent/project-read|agent/project-survey|\n"
+       "          agent/project-develop|agent/project-execute\n"
        "  selects the capability surface and defaults to\n"
        "  agent/project-develop, which can change the project;\n"
        "  agent/project-survey is read-only and agent/project-read is the\n"
-       "  frozen A0 surface. A resumed session keeps the profile it was\n"
+       "  frozen A0 surface. agent/project-execute adds project/run, which\n"
+       "  runs the project's own commands in a disposable machine, and needs\n"
+       "  --tools DIR (or BBAGENT_EXECUTOR_TOOLS) naming the trusted tool\n"
+       "  bundle to mount. A resumed session keeps the profile it was\n"
        "  created with\n"
        "--orientation none|minimal|generated|grounded|derived selects the\n"
        "  model capability preamble; it adds no authority and defaults to\n"
@@ -300,6 +353,7 @@
       "s0a-sqlite-smoke" (sqlite-smoke-command options)
       "s0b-native-smoke" (s0b-smoke-command options)
       "a3a-worker-smoke" (a3a-smoke-command options)
+      "a3b-execute-smoke" (a3b-smoke-command options)
       "describe" (prn {:application :bbagent
                          :scope :a1
                          :surface :persistent-sci})

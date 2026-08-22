@@ -14,7 +14,7 @@
 (def ^:private sqlite-sidecar-sha256
   "f374da845a36d0a663521457f8e454413325e3b8247a15c2677426f4b15cf6ac")
 
-(def ^:private authority-negative-count 51)
+(def ^:private authority-negative-count 58)
 
 (defn- ensure! [condition message data]
   (when-not condition
@@ -279,7 +279,20 @@
      "clojure.java.shell/require" "(require '[clojure.java.shell :as shell])"
      "project/run" "(project/run {:argv [\"true\"]})"
      "process/run" "(process/run {:argv [\"true\"]})"
-     "smolvm/run" "(smolvm/run {:argv [\"true\"]})"}))
+     "smolvm/run" "(smolvm/run {:argv [\"true\"]})"
+
+     ;; A3b: one profile can now run the project's own commands.  This one
+     ;; cannot, and the corpus is what says so.  The seam that carries
+     ;; execution is trusted host code on both sides of the bb4t boundary,
+     ;; so neither side is nameable from a bounded Context, and neither is
+     ;; the host directory the tool bundle comes from.
+     "bb4t.execution/require" "(require '[bb4t.execution :as execution])"
+     "bb4t.execution/describe" "(bb4t.execution/describe nil)"
+     "bbagent.executor/require" "(require '[bbagent.executor :as executor])"
+     "bbagent.executor/create" "(bbagent.executor/create {:tools \"/\"})"
+     "bbagent.executor/approved-versions" "bbagent.executor/approved-versions"
+     "bbagent.bb4t/require" "(require '[bbagent.bb4t :as app-runtime])"
+     "bbagent.bb4t/create" "(bbagent.bb4t/create \".\" :agent/project-execute)"}))
 
 (defn authority-smoke!
   "Proves the actual A0 Context remains unchanged despite trusted SQLite reachability."

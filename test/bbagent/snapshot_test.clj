@@ -1,6 +1,7 @@
 (ns bbagent.snapshot-test
   (:require [bbagent.snapshot :as snapshot]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]])
   (:import [java.nio.file Files Path Paths]
            [java.nio.file.attribute FileAttribute]))
@@ -187,3 +188,28 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"not a directory"
                           (snapshot/manifest (str file))))))
+
+(deftest excluded-paths-are-named-rather-than-silently-skipped-test
+  ;; The worker hides what the manifest refused to describe, and it uses this
+  ;; list to do it.  A skipped entry that went unnamed would be a path a
+  ;; workload could see and a coordinate could not account for.
+  (let [root (temp-root "excluded")]
+    (spit! root "README.md" "hello")
+    (spit! root ".git/config" "[core]")
+    (spit! root "src/main.clj" "(ns main)")
+    (spit! root "src/deep/target/out.o" "binary")
+    (let [manifest (snapshot/manifest
+                    root {:exclusions (conj snapshot/default-exclusions
+                                            "target")})]
+      (testing "every exclusion is reported, at whatever depth it was found"
+        (is (= [".git" "src/deep/target"]
+               (:snapshot/excluded-paths manifest))))
+      (testing "and nothing under an excluded path is described"
+        (let [paths (set (map :path (:snapshot/entries manifest)))]
+          (is (contains? paths "src/main.clj"))
+          (is (not-any? #(str/starts-with? % ".git") paths))
+          (is (not-any? #(str/includes? % "target") paths)))))
+    (testing "a project with nothing to exclude reports nothing"
+      (let [plain (temp-root "unexcluded")]
+        (spit! plain "README.md" "hello")
+        (is (= [] (:snapshot/excluded-paths (snapshot/manifest plain))))))))

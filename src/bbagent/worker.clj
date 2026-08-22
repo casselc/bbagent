@@ -11,18 +11,26 @@
      authoritative project root
            |  read-only mount           the host tree is never writable
            v
-        /input                          overlay lower layer
+        /input                          overlay lower layer, then masked
            |  overlayfs, upper in VM    copy-on-write, zero copy in
            v
         /work                           writable, dies with the machine
-           |
+           |  excluded paths whited out
            v
         argv
 
    Project-owned code may do whatever it likes to /work.  None of it
    reaches the host, because the only host filesystem the machine can see
    is mounted read-only, and the layer that absorbs the writes lives and
-   dies inside the machine."
+   dies inside the machine.
+
+   What the workload sees is what the input coordinate describes.  Paths
+   the snapshot excluded are removed from the workspace and the raw export
+   is covered, so a command cannot read a part of the project that its own
+   result does not account for.  This holds for a workload that is merely
+   running; it is not a privilege boundary.  The workload is root inside
+   the machine and can put the export back, which is why the machine, and
+   not the guest mount table, is what the isolation rests on."
   (:require [bbagent.process :as process]
             [bbagent.snapshot :as snapshot]
             [clojure.string :as str])
@@ -84,8 +92,9 @@
   (throw (ex-info message (assoc data :bbagent/error :worker-invalid))))
 
 (def ^:private prelude
-  ;; Positional parameters carry the working directory and the argv, so no
-  ;; part of a caller's command is ever interpolated into shell source.
+  ;; Positional parameters carry the hidden paths, the working directory and
+  ;; the argv, so no part of a caller's command is ever interpolated into
+  ;; shell source.  The layout is: a count, that many paths, the cwd, argv.
   (str/join
    "\n"
    ["set -u"
@@ -95,10 +104,50 @@
          " lowerdir=" guest-input ",upperdir=/storage/upper,workdir=/storage/work"
          " " guest-work " 2>/dev/null ||"
          " { echo \"" prelude-marker "overlay\" >&2; exit " prelude-exit "; }")
+    ;; Removing a path that exists only in the read-only lower layer writes a
+    ;; whiteout into the upper one.  Nothing on the host is touched; the
+    ;; workspace simply stops having it.
+    "hidden=\"$1\"; shift"
+    "while [ \"$hidden\" -gt 0 ]; do"
+    (str "  rm -rf \"" guest-work "/$1\" 2>/dev/null ||"
+         " { echo \"" prelude-marker "hide\" >&2; exit " prelude-exit "; }")
+    "  shift"
+    "  hidden=$((hidden - 1))"
+    "done"
+    ;; The raw project export is the overlay's lower layer and is otherwise
+    ;; readable at its own path, which would put the excluded paths back
+    ;; within reach of an ordinary command.  The overlay keeps its own
+    ;; reference to it, so covering the mount point costs nothing.
+    (str "mount -t tmpfs -o size=4k tmpfs " guest-input " 2>/dev/null ||"
+         " { echo \"" prelude-marker "mask\" >&2; exit " prelude-exit "; }")
     (str "cd \"" guest-work "/$1\" 2>/dev/null ||"
          " { echo \"" prelude-marker "cwd\" >&2; exit " prelude-exit "; }")
     "shift"
     "exec \"$@\""]))
+
+(defn- validated-hidden
+  "The paths the workspace must not contain.
+
+   These come from the snapshot's own account of what it refused to
+   describe, so they are already relative and already inside the tree.  They
+   are checked anyway: this is the one list that decides what a workload can
+   see, and a path that escaped it would hide something outside the project
+   instead of something inside it."
+  [hidden]
+  (mapv (fn [path]
+          (let [path (str path)
+                ^Path parsed (Paths/get path (make-array String 0))]
+            (when (or (str/blank? path) (.isAbsolute parsed))
+              (fail! "Worker hidden path must be relative to the project root"
+                     {:worker/hidden path}))
+            (let [normalized (str (.normalize parsed))]
+              (when (or (str/blank? normalized)
+                        (= ".." normalized)
+                        (str/starts-with? normalized "../"))
+                (fail! "Worker hidden path must stay inside the project root"
+                       {:worker/hidden path}))
+              normalized)))
+        (or hidden [])))
 
 (defn- validated-cwd
   "A caller's working directory, as a path that cannot leave the workspace."
@@ -138,7 +187,7 @@
         (or tools [])))
 
 (defn- machine-argv
-  [{:keys [root cwd argv environment tools limits]}]
+  [{:keys [root cwd argv environment tools limits hidden]}]
   (into
    (into
     (into
@@ -153,7 +202,10 @@
            (mapcat (fn [tool] ["-v" (str tool ":" guest-tools ":ro")]) tools))
      (mapcat (fn [[k v]] ["-e" (str k "=" v)]) (sort guest-environment)))
     (mapcat (fn [[k v]] ["-e" (str k "=" v)]) (sort environment)))
-   (into ["--" "/bin/sh" "-c" prelude "bbagent-worker" cwd] argv)))
+   (-> ["--" "/bin/sh" "-c" prelude "bbagent-worker" (str (count hidden))]
+       (into hidden)
+       (conj cwd)
+       (into argv))))
 
 (def ^:private manager-banner
   ;; The machine manager announces itself on stderr and has no quiet flag,
@@ -215,14 +267,20 @@
         tools (validated-tools tools)
         before (snapshot/manifest project-root snapshot)
         root (:snapshot/root before)
+        ;; The workspace hides exactly what the manifest refused to describe.
+        ;; Taken from the manifest rather than from the exclusion names, so
+        ;; the two cannot drift: what a workload can see is what the
+        ;; coordinate covers.
+        hidden (validated-hidden (:snapshot/excluded-paths before))
         emit (fn [event] (when events (events event)) event)
-        request {:root root :cwd cwd :argv (vec argv)
+        request {:root root :cwd cwd :argv (vec argv) :hidden hidden
                  :environment environment :tools tools :limits limits}]
     (emit {:event/type :worker/started
            :worker/runtime executable
            :worker/argv (vec argv)
            :worker/cwd cwd
            :worker/limits limits
+           :worker/hidden-paths hidden
            :project/input-coordinate (:snapshot/coordinate before)})
     (let [result (process/execute!
                   {:argv (into [executable] (machine-argv request))
@@ -260,6 +318,7 @@
                :project/input-stable? stable?
                :project/entry-count (:snapshot/entry-count before)
                :project/bytes (:snapshot/bytes before)
+               :project/hidden-paths hidden
                :worker/limits limits}
         (= :completed status) (assoc :exit (:exit result))
         stable? (assoc :project/input-coordinate

@@ -68,7 +68,7 @@
            (set (map :status (vals (:negative-probes result))))))
     (is (= #{:bb4t-evaluation-failure}
             (set (map :error/category (vals (:negative-probes result))))))
-    (is (= 51 (:negative-probe/count result)))
+    (is (= 58 (:negative-probe/count result)))
     (is (every? #(contains? (:negative-probes result) %)
                 ["java.sql.Date" "java.sql.Timestamp"
                  "bbagent.journal/require" "bbagent.journal/file-store"]))
@@ -97,6 +97,18 @@
                    "project/run"
                    "process/run"
                    "smolvm/run"])))
+    (testing "and neither does one profile being able to execute"
+      ;; A3b grants project/run to :agent/project-execute. This probe runs
+      ;; against the default profile, which does not have it, and the seam
+      ;; that carries it is trusted host code on both sides.
+      (is (every? #(contains? (:negative-probes result) %)
+                  ["bb4t.execution/require"
+                   "bb4t.execution/describe"
+                   "bbagent.executor/require"
+                   "bbagent.executor/create"
+                   "bbagent.executor/approved-versions"
+                   "bbagent.bb4t/require"
+                   "bbagent.bb4t/create"])))
     (is (false? (:forbidden-database/created? result)))))
 
 (deftest frozen-a0-profile-is-unchanged-test

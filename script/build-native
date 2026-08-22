@@ -257,7 +257,7 @@ fi
 TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" s0a-sqlite-smoke \
   --database "$BUILD_ROOT/s0b-authority.db" --project "$S0B_PROJECT" \
   > "$BUILD_ROOT/s0b-authority.edn"
-if ! grep -Fq ':negative-probe/count 51' "$BUILD_ROOT/s0b-authority.edn" || \
+if ! grep -Fq ':negative-probe/count 58' "$BUILD_ROOT/s0b-authority.edn" || \
    ! grep -Fq 'java.sql.Date' "$BUILD_ROOT/s0b-authority.edn" || \
    ! grep -Fq 'java.sql.Timestamp' "$BUILD_ROOT/s0b-authority.edn" || \
    ! grep -Fq 'bbagent.journal/file-store' "$BUILD_ROOT/s0b-authority.edn" || \
@@ -328,7 +328,12 @@ for negative in 'bbagent.worker/require' \
                 'clojure.java.shell/require' \
                 'project/run' \
                 'process/run' \
-                'smolvm/run'
+                'smolvm/run' \
+                'bb4t.execution/require' \
+                'bb4t.execution/describe' \
+                'bbagent.executor/require' \
+                'bbagent.executor/create' \
+                'bbagent.bb4t/create'
 do
   if ! grep -Fq "$negative" "$BUILD_ROOT/s0b-authority.edn"
   then
@@ -443,6 +448,152 @@ then
   exit 1
 fi
 
+# A3b: one semantic operation now hands that substrate to a bounded Context.
+# Every gate below enters through project/run rather than through the worker,
+# because what is being proven is the operation and not the substrate.
+A3B_PROJECT="$BUILD_ROOT/a3b-project"
+A3B_OUTSIDE="$BUILD_ROOT/a3b-outside"
+mkdir -p "$A3B_PROJECT/src" "$A3B_PROJECT/.git" "$A3B_OUTSIDE"
+printf 'original\n' > "$A3B_PROJECT/src/a.txt"
+printf 'keep me\n' > "$A3B_PROJECT/src/b.txt"
+printf 'excluded-from-the-coordinate\n' > "$A3B_PROJECT/.git/config"
+printf 'SENTINEL-OUTSIDE-THE-PROJECT\n' > "$A3B_OUTSIDE/host-secret.txt"
+
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3b-execute-smoke \
+  --phase describe --project "$A3B_PROJECT" \
+  --tools "$A3A_TOOLS" > "$BUILD_ROOT/a3b-describe.edn"
+if ! grep -Fq ':executor/available? true' "$BUILD_ROOT/a3b-describe.edn" || \
+   ! grep -Fq ':approval :recognized' "$BUILD_ROOT/a3b-describe.edn" || \
+   ! grep -Fq ':network :none' "$BUILD_ROOT/a3b-describe.edn"
+then
+  echo "A3b: the native image could not authorize an execution environment" >&2
+  exit 1
+fi
+
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3b-execute-smoke \
+  --phase version --project "$A3B_PROJECT" \
+  --tools "$A3A_TOOLS" > "$BUILD_ROOT/a3b-version.edn"
+for gate in ':version/unapproved-refused :ok' \
+            ':version/override-is-recorded :ok' \
+            ':version/approved-is-recognized :ok' \
+            ':version/tool-bundle-required :ok' \
+            ':version/no-executor-no-context :ok'
+do
+  if ! grep -Fq "$gate" "$BUILD_ROOT/a3b-version.edn"
+  then
+    echo "A3b compatibility gate failed: $gate" >&2
+    exit 1
+  fi
+done
+
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3b-execute-smoke \
+  --phase authority --project "$A3B_PROJECT" \
+  --tools "$A3A_TOOLS" > "$BUILD_ROOT/a3b-authority.edn"
+for gate in ':profile :agent/project-execute' \
+            ':run-granted :ok' \
+            ':develop-plus-one :ok' \
+            ':all-refused :ok' \
+            ':refused-for-the-right-reason :ok' \
+            ':no-host-path-in-executor :ok' \
+            ':projected-class-count 0' \
+            ':supplied-import-count 0'
+do
+  if ! grep -Fq "$gate" "$BUILD_ROOT/a3b-authority.edn"
+  then
+    echo "A3b authority gate failed: $gate" >&2
+    exit 1
+  fi
+done
+
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3b-execute-smoke \
+  --phase probe --project "$A3B_PROJECT" --tools "$A3A_TOOLS" \
+  --sentinel "$A3B_OUTSIDE/host-secret.txt" > "$BUILD_ROOT/a3b-probe.edn"
+for gate in ':probe/exit-zero :ok' \
+            ':probe/exit-exact :ok' \
+            ':probe/streams-separated :ok' \
+            ':probe/workload-believed-it-wrote :ok' \
+            ':probe/host-checkout-unchanged :ok' \
+            ':probe/host-file-unreadable :ok' \
+            ':probe/network-unreachable :ok' \
+            ':probe/excluded-paths-invisible :ok' \
+            ':probe/deadline-is-distinct :ok' \
+            ':probe/program-chose-124 :ok' \
+            ':probe/cwd-is-honoured :ok' \
+            ':probe/input-coordinate-present :ok' \
+            ':probe/executor-coordinate-recorded :ok' \
+            ':probe/nothing-left-running :ok'
+do
+  if ! grep -Fq "$gate" "$BUILD_ROOT/a3b-probe.edn"
+  then
+    echo "A3b isolation gate failed: $gate" >&2
+    exit 1
+  fi
+done
+if grep -Fq 'SENTINEL-OUTSIDE-THE-PROJECT' "$BUILD_ROOT/a3b-probe.edn" || \
+   grep -Fq 'excluded-from-the-coordinate' "$BUILD_ROOT/a3b-probe.edn"
+then
+  echo "A3b probe leaked host or excluded content into its own evidence" >&2
+  exit 1
+fi
+
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3b-execute-smoke \
+  --phase unstable --project "$A3B_PROJECT" \
+  --tools "$A3A_TOOLS" > "$BUILD_ROOT/a3b-unstable.edn"
+for gate in ':unstable/status :project-changed' \
+            ':unstable/not-ordinary-success :ok' \
+            ':unstable/process-outcome-preserved :ok' \
+            ':unstable/no-coordinate-claimed :ok' \
+            ':unstable/a-later-run-is-anchored-again :ok'
+do
+  if ! grep -Fq "$gate" "$BUILD_ROOT/a3b-unstable.edn"
+  then
+    echo "A3b unstable-input gate failed: $gate" >&2
+    exit 1
+  fi
+done
+
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3b-execute-smoke \
+  --phase replay --project "$A3B_PROJECT" \
+  --tools "$A3A_TOOLS" > "$BUILD_ROOT/a3b-replay.edn"
+for gate in ':replay/one-execution :ok' \
+            ':replay/replay-succeeded :ok' \
+            ':replay/no-second-execution :ok' \
+            ':replay/result-restored :ok' \
+            ':replay/exit-restored :ok' \
+            ':replay/legacy-refused :ok' \
+            ':replay/legacy-did-not-execute :ok'
+do
+  if ! grep -Fq "$gate" "$BUILD_ROOT/a3b-replay.edn"
+  then
+    echo "A3b replay gate failed: $gate" >&2
+    exit 1
+  fi
+done
+
+# The dogfood target is again the checkout this image was built from, but
+# reached the way a model reaches it: a helper defined in SCI that calls
+# project/run, not a host function that calls the worker.
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3b-execute-smoke \
+  --phase dogfood --project "$BUILD_ROOT/bbagent" \
+  --tools "$A3A_TOOLS" > "$BUILD_ROOT/a3b-dogfood.edn"
+for gate in ':dogfood/check-passed :ok' \
+            ':dogfood/composed-through-sci :ok' \
+            ':dogfood/vandal-believed-it-succeeded :ok' \
+            ':dogfood/host-project-intact :ok'
+do
+  if ! grep -Fq "$gate" "$BUILD_ROOT/a3b-dogfood.edn"
+  then
+    echo "A3b dogfood gate failed: $gate" >&2
+    exit 1
+  fi
+done
+if [ -e "$BUILD_ROOT/bbagent/WORKER-WAS-HERE.txt" ] || \
+   [ ! -e "$BUILD_ROOT/bbagent/src/bbagent/worker.clj" ]
+then
+  echo "A3b dogfood workload reached the authoritative checkout" >&2
+  exit 1
+fi
+
 shopt -s nullglob dotglob
 runtime_tmp_entries=("$RUNTIME_TMP"/*)
 shopt -u nullglob dotglob
@@ -516,6 +667,10 @@ fi
     "$BUILD_ROOT/a3a-describe.edn" "$BUILD_ROOT/a3a-probe.edn" \
     "$BUILD_ROOT/a3a-timeout.edn" "$BUILD_ROOT/a3a-dogfood.edn" \
     "$BUILD_ROOT/a3a-smolvm-version.txt" "$BUILD_ROOT/a3a-bb-version.txt" \
+    "$BUILD_ROOT/a3b-describe.edn" "$BUILD_ROOT/a3b-version.edn" \
+    "$BUILD_ROOT/a3b-authority.edn" "$BUILD_ROOT/a3b-probe.edn" \
+    "$BUILD_ROOT/a3b-unstable.edn" "$BUILD_ROOT/a3b-replay.edn" \
+    "$BUILD_ROOT/a3b-dogfood.edn" \
     "$BUILD_ROOT/missing-sidecar.out" "$BUILD_ROOT/missing-sidecar.err" \
     "$BUILD_ROOT/mismatched-sidecar.out" \
     "$BUILD_ROOT/mismatched-sidecar.err" \

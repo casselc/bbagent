@@ -30,7 +30,7 @@
    to the project root; bb4t interpolates no host path into a failure message
    or into these values."
   [:bb4t/error :operation/id :capability/id :error/type
-   :path :limit :bytes :budget
+   :path :limit :bytes :budget :limit/max :cwd
    :bbagent/conflict :conflict/expected :conflict/observed
    :transcript/error :transcript/index :transcript/count
    :transcript/expected :transcript/actual])

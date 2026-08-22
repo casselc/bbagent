@@ -368,3 +368,68 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"non-empty vector of non-blank strings"
                           (run!! root ["  "])))))
+
+;; ---------------------------------------------------------------------------
+;; A3b: what the workload can see is what the coordinate describes
+
+(deftest excluded-paths-are-not-visible-to-a-workload-test
+  ;; The input coordinate does not describe .git, so a run that could read
+  ;; .git would be producing results the coordinate cannot account for.  Both
+  ;; places it would otherwise appear are closed: the workspace it runs in,
+  ;; and the read-only export that workspace is layered over.
+  (let [root (project! "hidden" {"README.md" "tracked"
+                                 ".git/config" "[core] secret-git-config"
+                                 "src/main.clj" "(ns main)"
+                                 "src/deep/target/out.o" "binary"})
+        exclusions (conj snapshot/default-exclusions "target")
+        options {:snapshot {:exclusions exclusions}}
+        manifest (snapshot/manifest root {:exclusions exclusions})
+        ;; Each listing is one line, so a name appearing in a later error
+        ;; message cannot be mistaken for a name appearing in a listing.
+        result (run!! root
+                      (shell (str "echo -n work:; ls -a /work | tr '\\n' ' '; echo; "
+                                  "echo -n input:; ls -a /input | tr '\\n' ' '; echo; "
+                                  "echo -n deep:; ls -a /work/src/deep | tr '\\n' ' '; echo; "
+                                  "cat /work/.git/config 2>&1; "
+                                  "cat /input/.git/config 2>&1"))
+                      options)
+        stdout (:stdout result)
+        listing (fn [label]
+                  (some #(when (str/starts-with? % (str label ":"))
+                           (subs % (inc (count (str label)))))
+                        (str/split-lines stdout)))]
+    (is (= :completed (:status result)) (pr-str result))
+    (testing "the workspace does not contain what the manifest excluded"
+      (is (str/includes? (listing "work") "README.md")
+          "the project itself is missing")
+      (is (not (str/includes? (listing "work") ".git"))
+          "an excluded directory was visible in the workspace")
+      (is (not (str/includes? (listing "deep") "target"))
+          "a nested excluded directory was visible in the workspace"))
+    (testing "and the read-only export is not a way around it"
+      (is (= #{"." ".."} (set (remove str/blank?
+                                      (str/split (listing "input") #"\s+"))))
+          "the raw project export was still reachable"))
+    (testing "and neither does the read-only export it is layered over"
+      (is (not (str/includes? stdout "secret-git-config"))
+          "the workload read a file the input coordinate does not describe")
+      (is (= 2 (count (re-seq #"No such file or directory" stdout)))))
+    (testing "the hidden set is exactly the excluded set"
+      (is (= (:snapshot/excluded-paths manifest)
+             (:project/hidden-paths result)))
+      (is (= [".git" "src/deep/target"] (:project/hidden-paths result))))
+    (testing "and the run is still anchored to the project it did see"
+      (is (= (:snapshot/coordinate manifest)
+             (:project/input-coordinate result))))))
+
+(deftest hiding-is-not-a-privilege-boundary-test
+  ;; Recorded rather than glossed.  The workload is root inside the machine
+  ;; and can put the export back; what protects the host is the machine, not
+  ;; the guest's mount table.  A3b claims the weaker property, and this is
+  ;; the test that keeps the claim honest by demonstrating its limit.
+  (let [root (project! "adversarial" {"README.md" "tracked"
+                                      ".git/config" "secret-git-config"})
+        result (run!! root (shell "umount /input && cat /input/.git/config"))]
+    (is (= :completed (:status result)))
+    (is (str/includes? (:stdout result) "secret-git-config")
+        "if this ever fails, hiding became stronger than A3b claimed")))

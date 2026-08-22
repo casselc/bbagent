@@ -10,7 +10,20 @@ Standing rules:
 - record explicit coordinates and honest unknown/development values;
 - prefer the smallest implementation that answers the active milestone question.
 
-For A3a (see `docs/CURRENT_SCOPE.md`):
+For A3b (see `docs/CURRENT_SCOPE.md`):
+
+- `project/run` takes argv, a relative cwd and a deadline, and nothing else;
+  which project, which tools, which machine and what it may reach are host
+  policy and must never acquire a model-facing spelling;
+- bb4t knows there is an authorized execution environment, bbagent knows it is
+  a virtual machine — keep `bb4t.execution` free of both, and keep the
+  environment's description inert and free of host paths;
+- a run whose project moved is not a run that verified anything; it gets its
+  own status and carries no input coordinate;
+- what a workload can see is what its result's coordinate accounts for — a new
+  snapshot exclusion is a new thing to hide, not just a smaller manifest.
+
+For A3a, still standing:
 
 - project-owned code runs in a disposable worker, never against the
   authoritative checkout; the project is mounted read-only and the writable

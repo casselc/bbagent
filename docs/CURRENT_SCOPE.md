@@ -1,14 +1,100 @@
-# Current Scope: A3a
+# Current Scope: A3b
 
-**For review.** `docs/A3A_FINDINGS.md` section 0 is the reviewer's entry point:
+**For review.** `docs/A3B_FINDINGS.md` section 0 is the reviewer's entry point:
 verdict, the boundary, evidence table, and the decisions it needs. This document
 states scope; that one states results.
 
 **Milestone status:** A0 PASS, S0a PASS, S0b PASS, A1 PASS, A1.1 PASS
-(frozen at `bbagent-a1.1`), **A2 PASS (accepted, frozen at `bbagent-a2` /
-`bb4t-a2`)**, A3a complete, recommended PASS.
+(frozen at `bbagent-a1.1`), A2 PASS (accepted, frozen at `bbagent-a2` /
+`bb4t-a2`), **A3a PASS (accepted, frozen at `bbagent-a3a` / `bb4t-a3a`)**,
+A3b complete, recommended PASS.
 
-## A3a: isolated project execution
+## A3b: one semantic execution capability
+
+A3b asks whether one minimal semantic `project/run` capability can expose the
+A3a execution substrate to bounded SCI without creating another authority path,
+weakening A2 replay semantics, or letting an unanchored execution look like
+verification evidence.
+
+A3a was a substrate milestone that added no authority. A3b is the opposite:
+it adds exactly one operation, to exactly one new profile, and everything else
+in it exists to bound what that operation can be used for.
+
+### The model-facing surface, entire
+
+```clojure
+(project/run {:argv ["bb" "script/a3a-source-check.clj"]
+              :cwd "."
+              :timeout-ms 120000})
+```
+
+Three arguments. `:cwd` and `:timeout-ms` are optional. There is no fourth.
+Which project, which tools, which machine manager, how much memory, whether
+there is a network, what is mounted and where — all of it is host policy, and
+none of it has a spelling a model can write.
+
+### Delivered
+
+- **`bb4t.execution`**: the semantic notion of an authorized execution
+  environment — two functions, `-describe` and `-execute`. bb4t knows a Context
+  may be allowed to run something somewhere that is not the host; it does not
+  know what a machine is.
+- **`:project/run`** (bb4t): the capability, its effect `:project/execute`
+  classified as an actuation, argument validation, limit enforcement, and the
+  result semantics. Bound to a new runtime resource `:execution/environment`.
+- **`:agent/project-execute`** (bb4t): `:agent/project-develop` plus exactly one
+  capability. The three A2/A3a profiles are untouched, and a session still
+  defaults to `:agent/project-develop`.
+- **`bbagent.executor`**: the host implementation. Version approval against a
+  measured set, one host-selected tool bundle with a digest, host-enforced
+  ceilings, and an inert description with no host path in it.
+- **Exclusions made invisible**: `bbagent.snapshot` now reports the paths it
+  refused to describe, and the worker hides exactly those. What a workload sees
+  is what its own result coordinate accounts for.
+- **Native evidence**: 5 compatibility gates, 8 authority gates, 14 isolation
+  gates entered through `project/run`, 5 unstable-input gates, 7 replay gates
+  and 4 dogfood gates, all run from the image by `script/build-native`.
+
+### Three decisions worth reviewing
+
+- **The project root comes from bb4t, not from the executor.** `-execute`
+  receives the root as part of its request. bb4t stays authoritative about which
+  project is being executed against, exactly as it is for every other project
+  operation, and the executor's root cannot silently diverge from the Context's.
+- **A moved project gets a status of its own.** `:status :project-changed`, with
+  the process outcome demoted to `:process/status` and `:process/exit`. Nothing
+  can pattern-match `{:status :completed :exit 0}` against a run that was never
+  anchored to one project state.
+- **An unmeasured machine manager is refused.** A3a measured smolvm 1.7.5 and
+  claims nothing about any other version. A3b fails closed rather than assuming
+  equivalence; a trusted host may override, and the override is recorded in the
+  execution environment's coordinate so a run made under one is distinguishable.
+
+### The one property that is weaker than it looks
+
+Excluded paths are hidden from the workspace and the read-only export is masked,
+so no ordinary command can read a path the input coordinate does not describe.
+This is **not** a privilege boundary. The workload is root inside the machine
+and can remount the export; that is measured and gated, not glossed. What
+protects the host is the machine, not the guest's mount table. See
+`docs/A3B_FINDINGS.md` section 5.
+
+### Explicit exclusions
+
+No `project/test`, `project/build`, or `project/lint`; no vocabulary of host
+tools; no generic host shell access; no background-process lifecycle; no Git
+tooling; no network enablement; no memory, skills, subagents, or SCI Extension
+Manager. No new replay logic specific to execution — A2's operation transcripts
+carry it unchanged.
+
+### Stop gate
+
+Stop after A3b findings and fresh review. Do not begin the SCI Extension
+Manager automatically.
+
+---
+
+## A3a: isolated project execution (accepted, frozen at `bbagent-a3a` / `bb4t-a3a`)
 
 A3a asks whether trusted host code can execute arbitrary project-owned code in
 a hard-bounded worker, get a structured result, terminate it reliably, and prove
@@ -81,11 +167,11 @@ Extension Manager, Cedar, Chiasmus, autonomous daemon, or MCP/A2A/ACP. A2's
 operation transcripts, SQLite storage, checkpoints, ContextSpec and TUI
 architecture are not redesigned.
 
-### Stop gate
+### Stop gate (met)
 
-Stop after A3a findings and fresh review. Do not begin A3b automatically;
-`docs/A3A_FINDINGS.md` section 9 recommends it, including that it needs a new
-`:agent/project-execute` profile rather than a widened A2 one.
+A3a stopped for review and was accepted. Its recommendation — that execution
+needs a new `:agent/project-execute` profile rather than a widened A2 one — is
+what A3b implemented.
 
 ---
 
@@ -228,14 +314,6 @@ present capabilities; give me filenames to read"* — reaching that quickly and
 correctly is the result we want, because it distinguishes *cannot discover
 capability* from *discovers capability and finds it insufficient*. Only the
 second is evidence for adding `project/list`.
-
-### Closed before freezing
-
-Two edges were tightened after the evidence was gathered, on the grounds that
-both are cheap now and expensive once a model can invoke this path: the snapshot
-limits are now exact rather than approximate at the final entry, and every
-absolute symlink is refused rather than only those pointing outside the root.
-See `docs/A3A_FINDINGS.md` section 3.
 
 ### Explicit exclusions
 

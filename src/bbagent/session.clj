@@ -87,15 +87,18 @@
    profile selects the capability surface and defaults to
    bb4t/default-profile, which is :agent/project-develop: the surface that can
    change the project, because that is what A2 asks about.
-   :agent/project-survey remains selectable and read-only, and
-   :agent/project-read remains the frozen A0 surface.
+   :agent/project-survey remains selectable and read-only,
+   :agent/project-read remains the frozen A0 surface, and
+   :agent/project-execute adds the authority to run the project's own
+   commands in a disposable workspace.  executor carries the trusted host
+   options that surface needs and is ignored by every other profile.
 
    orientation defaults to :derived, whose claims are generated from whatever
    that surface projects; :grounded, which A1.1 measured, states limits as
    prose and is false against any surface that can enumerate.  Orientation adds
    no authority in either case."
   [{:keys [state-root project-root model-provider system-prompt session-id
-           store-backend orientation profile]
+           store-backend orientation profile executor]
     :or {session-id (coordinates/new-session-id) store-backend :sqlite
          orientation :derived}}]
   (let [run-id (coordinates/new-run-id)
@@ -107,7 +110,8 @@
       ;; flag is absent, so the default is applied here rather than in the
       ;; destructuring form.
       (let [runtime (bb4t/create (:project/root project)
-                                 (or profile bb4t/default-profile))
+                                 (or profile bb4t/default-profile)
+                                 {:executor executor})
             ;; Composed after the Context exists, because a generated preamble
             ;; is a projection of that Context's own description.
             ;; nil means "not selected", not ":none": the CLI passes the key
@@ -380,7 +384,14 @@
                                 (get-in started [:session/coordinate
                                                  :context :profile])
                                 :agent/project-read)
-            runtime (bb4t/create (:project/root project) resumed-profile)
+            ;; An executing session rebuilds its execution environment on
+            ;; resume, and refuses to resume if it cannot: replay reproduces
+            ;; what a run returned and never re-runs it, but the session
+            ;; carries on afterwards, and one that carried on without the
+            ;; authority it started with would be a different session
+            ;; wearing the same identity.
+            runtime (bb4t/create (:project/root project) resumed-profile
+                                 {:executor (:executor options)})
             {:keys [messages replay-forms replay-plan]}
             (recovery-state checkpoint tail
                             #(store/request-event event-store session-id %)

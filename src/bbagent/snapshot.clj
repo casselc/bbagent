@@ -83,13 +83,19 @@
         max-bytes (:snapshot/max-bytes limits)]
     (loop [pending (children root)
            entries []
+           excluded []
            total-bytes 0]
       (if-not (seq pending)
-        {:entries entries :bytes total-bytes}
+        {:entries entries :excluded excluded :bytes total-bytes}
         (let [^Path child (peek pending)
               pending (pop pending)]
           (if (contains? exclusions (str (.getFileName child)))
-            (recur pending entries total-bytes)
+            ;; Named, not just skipped.  A worker hides exactly the paths
+            ;; this walk refused to describe, so "excluded from the
+            ;; coordinate" and "not visible to the workload" are one set
+            ;; rather than two lists that have to be kept in agreement.
+            (recur pending entries (conj excluded (str (.relativize root child)))
+                   total-bytes)
             (let [relative (str (.relativize root child))
                   ;; Hinted, not inferred.  Without it the .size call below
                   ;; is a reflective lookup on a JDK-internal implementation
@@ -128,11 +134,13 @@
                                {:path relative
                                 :kind :symlink
                                 :target (str (Files/readSymbolicLink child))})
+                         excluded
                          total-bytes))
 
                 :directory
                 (recur (into pending (children child))
                        (conj entries {:path relative :kind :directory})
+                       excluded
                        total-bytes)
 
                 :file
@@ -148,10 +156,12 @@
                                 :bytes bytes
                                 :digest (str "sha256:"
                                              (coordinates/sha-256-path child))})
+                         excluded
                          (+ total-bytes bytes)))
 
                 (recur pending
                        (conj entries {:path relative :kind :other})
+                       excluded
                        total-bytes)))))))))
 
 (defn manifest
@@ -174,10 +184,14 @@
                                 :error/message (.getMessage failure)})))
          _ (when-not (Files/isDirectory path (make-array LinkOption 0))
              (fail! "Project root is not a directory" {:snapshot/root (str path)}))
-         {:keys [entries bytes]} (walk path exclusions limits)
+         {:keys [entries excluded bytes]} (walk path exclusions limits)
          entries (vec (sort-by :path entries))
          manifest {:snapshot/root (str path)
                    :snapshot/exclusions (vec (sort exclusions))
+                   ;; The paths the walk actually refused, not the names it
+                   ;; was told to refuse.  A worker that hides these hides
+                   ;; everything this coordinate does not describe.
+                   :snapshot/excluded-paths (vec (sort excluded))
                    :snapshot/entries entries
                    :snapshot/entry-count (count entries)
                    :snapshot/bytes bytes}]

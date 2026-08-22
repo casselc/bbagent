@@ -3,7 +3,8 @@
             [bb4t.events :as events]
             [bb4t.runtime :as runtime]
             [bb4t.transcript :as transcript]
-            [bbagent.errors :as errors]))
+            [bbagent.errors :as errors]
+            [bbagent.executor :as executor]))
 
 (def profiles
   "The context specs bbagent can ask bb4t for.
@@ -54,7 +55,33 @@
              :project/list-max-entries 4096
              :project/search-max-results 200
              :project/search-max-files 20000
-             :project/write-max-bytes 1048576}}})
+             :project/write-max-bytes 1048576}}
+
+   :agent/project-execute
+   {:context-spec/version 1
+    :profile :agent/project-execute
+    :requested-capabilities #{:data/json-read :data/json-write
+                              :project/read :project/list :project/search
+                              :project/stat :project/edit :project/run}
+    :authorized-capabilities #{:data/json-read :data/json-write
+                               :project/read :project/list :project/search
+                               :project/stat :project/edit :project/run}
+    :resource-bindings {:project :project/root
+                        :executor :execution/environment}
+    :limits {:project/read-max-bytes 1048576
+             :project/list-max-entries 4096
+             :project/search-max-results 200
+             :project/search-max-files 20000
+             :project/write-max-bytes 1048576
+             :project/run-max-timeout-ms 300000
+             :project/run-max-stdout-bytes 1048576
+             :project/run-max-stderr-bytes 1048576}}})
+
+(def execution-profiles
+  "Profiles that cannot be created without an authorized execution
+   environment.  bb4t refuses one of these outright when the runtime has no
+   environment bound; this is how bbagent knows to build one."
+  #{:agent/project-execute})
 
 (def default-profile
   "A2 asks whether the model can do real project work, which means changing
@@ -79,16 +106,31 @@
   (:authorized-capabilities (context-spec profile)))
 
 (defn create
-  ([project-root] (create project-root default-profile))
-  ([project-root profile]
+  "The runtime and Context for one session.
+
+   An executing profile builds its execution environment first and fails
+   closed if it cannot.  That is deliberately not deferred to the first run:
+   a session that believes it can verify its own work makes different
+   decisions from one that knows it cannot, and it should find out before it
+   has made any of them."
+  ([project-root] (create project-root default-profile nil))
+  ([project-root profile] (create project-root profile nil))
+  ([project-root profile options]
    (let [spec (context-spec profile)
-         runtime (runtime/create {:resources {:project/root project-root}
-                                  :event-limit 512})
+         environment (when (contains? execution-profiles profile)
+                       (or (:environment options)
+                           (executor/create (:executor options))))
+         runtime (runtime/create
+                  {:resources (cond-> {:project/root project-root}
+                                environment
+                                (assoc :execution/environment environment))
+                   :event-limit 512})
          context (context/create runtime spec)]
-     {:runtime runtime
-      :context context
-      :runtime/description (runtime/describe runtime)
-      :context/description (context/describe context)})))
+     (cond-> {:runtime runtime
+              :context context
+              :runtime/description (runtime/describe runtime)
+              :context/description (context/describe context)}
+       environment (assoc :executor environment)))))
 
 (defn- transcript-for
   "The transcript one evaluation runs under.
