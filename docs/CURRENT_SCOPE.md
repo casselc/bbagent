@@ -5,8 +5,8 @@ This document states scope; that one states results.
 
 **Milestone status:** A0 PASS, S0a PASS, S0b PASS, A1 PASS, A1.1 PASS
 (frozen at `bbagent-a1.1`), A2 PASS (frozen at `bbagent-a2` / `bb4t-a2`),
-A3a PASS (frozen at `bbagent-a3a` / `bb4t-a3a`), A3b PASS (recommended,
-**untagged**, under review), **A3c PASS (accepted, frozen at `bbagent-a3c` /
+A3a PASS (frozen at `bbagent-a3a` / `bb4t-a3a`), A3b PASS (frozen at
+`bbagent-a3b` / `bb4t-a3b`), **A3c PASS (accepted, frozen at `bbagent-a3c` /
 `bb4t-a3c`)**.
 
 **Coordinates.** bbagent `740d117457aae6d84bbe3f9dc713bea1c894ea8c`; bb4t
@@ -15,8 +15,16 @@ A3a PASS (frozen at `bbagent-a3a` / `bb4t-a3a`), A3b PASS (recommended,
 (148 299 264 bytes), built from the same commit. `artifacts/a3c-evidence.edn`
 is authoritative for every figure.
 
-A3b was never tagged, so the tag sequence runs `bbagent-a3a` → `bbagent-a3c`.
-That is repository reality, recorded rather than silently closed over.
+A3b was tagged retroactively, after A3c, at its own evidence coordinate
+`861bea55845507291ed065b415a7abcd0d491b43` (runtime `84201fc`). The tag
+therefore shows A3b as it stood: a root workload, and hiding that was not a
+privilege boundary. The pointers to where A3c closed that live on this branch
+and deliberately not under that tag.
+
+`artifacts/a3c-evidence.edn` still records `:predecessor {:tagged? false}`.
+That was true when A3c was frozen and is left as measured; a frozen evidence
+artifact that drifts is worth less than one that is occasionally out of date.
+This document is the current statement.
 
 ## A3c: a guest of our own, and a workload that is not root
 

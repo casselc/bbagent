@@ -241,11 +241,17 @@ machine exists. A `bb4t-a3c` tag is placed at that unchanged coordinate so the
 milestone has a bb4t coordinate to name, following the A3a precedent; no commit
 was manufactured to obtain a new SHA.
 
-**A3b is not tagged.** It was recommended PASS and stopped for review, and
-tagging was never requested. Freezing A3c therefore leaves a gap in the tag
-sequence — `bbagent-a3a` then `bbagent-a3c`. That is repository reality rather
-than an oversight in this milestone, and it is recorded here so a reviewer is
-not left inferring that A3b was skipped.
+**A3b was not tagged when A3c was frozen.** It had been recommended PASS and
+stopped for review, and tagging was never requested, so freezing A3c left a gap
+in the tag sequence. That is what `artifacts/a3c-evidence.edn` records, and it
+was true at the time.
+
+> **Later note.** A3b has since been frozen retroactively at its own evidence
+> coordinate, `bbagent-a3b` / `bb4t-a3b` = `861bea5` / `227d3854`. The sequence
+> is now continuous. The A3c evidence artifact is left as measured rather than
+> amended, because an evidence record that drifts after its freeze is worth
+> less than one that is occasionally out of date; `docs/CURRENT_SCOPE.md` is
+> the current statement.
 
 ## 9. Recommendation
 

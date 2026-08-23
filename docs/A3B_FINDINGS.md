@@ -1,5 +1,8 @@
 # A3b Findings: one semantic execution capability
 
+> **Frozen at `bbagent-a3b` / `bb4t-a3b`**, retroactively, at this document's
+> own evidence coordinate `861bea5` (runtime `84201fc`, bb4t `227d3854`).
+>
 > **Later note (A3c).** Section 5 records a property A3b measured and declined
 > to overclaim: excluded paths were hidden from the workload's ordinary view,
 > and a workload that wanted to could remount the raw export, because it was
