@@ -1,15 +1,71 @@
-# Current Scope: A3b
+# Current Scope: A3c
 
-**For review.** `docs/A3B_FINDINGS.md` section 0 is the reviewer's entry point:
-verdict, the boundary, evidence table, and the decisions it needs. This document
-states scope; that one states results.
+**For review.** `docs/A3C_FINDINGS.md` section 0 is the reviewer's entry point.
+This document states scope; that one states results.
 
 **Milestone status:** A0 PASS, S0a PASS, S0b PASS, A1 PASS, A1.1 PASS
-(frozen at `bbagent-a1.1`), A2 PASS (accepted, frozen at `bbagent-a2` /
-`bb4t-a2`), **A3a PASS (accepted, frozen at `bbagent-a3a` / `bb4t-a3a`)**,
-A3b complete, recommended PASS.
+(frozen at `bbagent-a1.1`), A2 PASS (frozen at `bbagent-a2` / `bb4t-a2`),
+A3a PASS (frozen at `bbagent-a3a` / `bb4t-a3a`), **A3b PASS (recommended,
+under review)**, A3c complete, recommended PASS.
 
-## A3b: one semantic execution capability
+## A3c: a guest of our own, and a workload that is not root
+
+A3b shipped with one nonclaim a reviewer flagged: excluded project paths were
+hidden from the workload's ordinary view, and a workload that wanted to could
+remount the raw export and read them, because it was root inside the machine.
+A3c closes that, and takes the opportunity to remove the most dangerous thing
+in the design while it is in there.
+
+### The question
+
+Can the guest become something this project builds and pins, so that the
+workload runs unprivileged, the toolchain stops being a host directory, and
+the sequence that establishes the boundary is covered by one digest?
+
+### Delivered
+
+- **`worker-image/`**: a Containerfile and the guest prelude, built by
+  `script/build-worker-image` into an archive whose digest the executor pins.
+  The build asserts the image contains no setuid or setgid binary.
+- **An unprivileged workload**: the prelude mounts as root, hides what the
+  input coordinate does not describe, masks the raw export, and only then
+  drops to an identity **derived from the project's owner** with no
+  capabilities at all. What it used to be able to undo, it cannot reach.
+- **No host tool directory**: the toolchain is in the image, so the project is
+  the only host path any machine sees. The `:tools` argument is gone from the
+  worker entirely rather than merely being unexposed.
+- **A host/guest contract**: the prelude checks an argument-order version
+  before it mounts anything, so a binary and an image that disagree refuse
+  instead of building a workspace and running the wrong thing in it.
+- **The image digest in the coordinate**: which guest ran is now part of a
+  session's identity instead of being implicit.
+
+### What this does and does not change
+
+It does not make the machine boundary redundant, and it is not claimed to.
+The workload could still, in principle, escalate through a kernel bug; what
+it cannot do is the ordinary thing — call `umount`. The claim moves from
+"holds for a workload that is merely running" to "requires defeating the
+kernel", and the guest carries no setuid binary to make that easier.
+
+Commands that genuinely need root — installing packages, binding ports below
+1024 — stop working. Package installation was already out of scope.
+
+### Explicit exclusions
+
+No new model-facing capability; `project/run` is unchanged and so is every
+profile. No network enablement, no package installation, no second image, no
+registry publishing, no user namespaces or seccomp policy beyond what the
+privilege drop gives. A2's transcripts, storage, checkpoints and ContextSpec
+are untouched.
+
+### Stop gate
+
+Stop after A3c findings and fresh review, together with A3b.
+
+---
+
+## A3b: one semantic execution capability (recommended PASS, under review)
 
 A3b asks whether one minimal semantic `project/run` capability can expose the
 A3a execution substrate to bounded SCI without creating another authority path,
@@ -70,14 +126,19 @@ none of it has a spelling a model can write.
   equivalence; a trusted host may override, and the override is recorded in the
   execution environment's coordinate so a run made under one is distinguishable.
 
-### The one property that is weaker than it looks
+### The one property that is weaker than it looks *(closed by A3c)*
 
-Excluded paths are hidden from the workspace and the read-only export is masked,
-so no ordinary command can read a path the input coordinate does not describe.
-This is **not** a privilege boundary. The workload is root inside the machine
-and can remount the export; that is measured and gated, not glossed. What
-protects the host is the machine, not the guest's mount table. See
-`docs/A3B_FINDINGS.md` section 5.
+As measured at A3b: excluded paths are hidden from the workspace and the
+read-only export is masked, so no ordinary command can read a path the input
+coordinate does not describe. At A3b this was **not** a privilege boundary --
+the workload was root inside the machine and could remount the export, which
+was measured and gated rather than glossed.
+
+**A3c closed this.** The workload now runs unprivileged with no capabilities
+and cannot unmount the mask. The paragraph above is kept as A3b's own account
+so the progression stays visible; it is not current behaviour. What protects
+the *host* is still the machine, not the guest's mount table. See
+`docs/A3B_FINDINGS.md` section 5 and `docs/A3C_FINDINGS.md`.
 
 ### Explicit exclusions
 

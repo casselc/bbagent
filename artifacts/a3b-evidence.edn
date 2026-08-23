@@ -87,6 +87,9 @@
   :nested-exclusions/handled? true
   :privilege-boundary? false
   :residual "a root workload inside the machine can `umount /input` and read the raw export; measured, gated, and claimed no more strongly than that"
+  :superseded-by {:milestone :a3c
+                  :what "the workload is no longer root and holds no capabilities, so the residual above is closed"
+                  :note "this record is left as measured; it describes A3b and is not current behaviour"}
   :residual/gated-by "bbagent.worker-test/hiding-is-not-a-privilege-boundary-test"
   :stronger-property/would-need "a host-side filtered export (hardlink mirror); out of scope for A3b"}
 
@@ -196,8 +199,10 @@
   "the first live run's fixture generated an unmatchable regex, so its check could not pass; the model diagnosed that by running bb -e through project/run rather than concluding its own edit had failed. Recorded in docs/A3B_FINDINGS.md section 10b; the run reported here is the corrected one."
   :raw "artifacts/a3b-dogfood-runs.edn"}
 
+ :superseded-by :a3c
+
  :nonclaims
- ["hiding excluded paths is not a privilege boundary; the machine is the boundary"
+ ["hiding excluded paths is not a privilege boundary; the machine is the boundary (closed by A3c)"
   "one manager version is approved because one has been measured, not because others are worse"
   "the overlay's lower layer is still live; A3b detects movement and does not prevent it"
   ":cwd is validated lexically, against the workspace it will be resolved in rather than against this tree"

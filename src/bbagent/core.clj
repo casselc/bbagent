@@ -258,6 +258,18 @@
                                           :session-id (:session options)}))
       (throw (ex-info "S0b smoke requires a known --phase" {:phase phase})))))
 
+(defn- emit-evidence!
+  "Prints one evidence map the same way everywhere.
+
+   `prn` abbreviates a map whose keys share a namespace, and whether it does
+   depends on `*print-namespace-maps*`, which clojure.main binds to true and a
+   native image leaves false.  The build gates grep this output, so the two
+   have to agree; binding it here means a phase verified on the JVM is
+   verifying the text the image will actually produce."
+  [value]
+  (binding [*print-namespace-maps* false]
+    (prn value)))
+
 (defn- a3a-smoke-command [options]
   (let [unknown (seq (remove #{:arguments :phase :project :sentinel :image}
                              (keys options)))
@@ -277,24 +289,12 @@
         "probe" (do
                   (when-not (:sentinel options)
                     (throw (ex-info "A3a probe requires --sentinel PATH" {})))
-                  (prn (a3a-smoke/probe! settings)))
-        "timeout" (prn (a3a-smoke/timeout! settings))
-        "dogfood" (prn (a3a-smoke/dogfood! settings))
-        "describe" (prn (worker/describe))
+                  (emit-evidence! (a3a-smoke/probe! settings)))
+        "timeout" (emit-evidence! (a3a-smoke/timeout! settings))
+        "dogfood" (emit-evidence! (a3a-smoke/dogfood! settings))
+        "describe" (emit-evidence! (worker/describe))
         (throw (ex-info "A3a smoke requires a known --phase"
                         {:phase phase}))))))
-
-(defn- emit-evidence!
-  "Prints one evidence map the same way everywhere.
-
-   `prn` abbreviates a map whose keys share a namespace, and whether it does
-   depends on `*print-namespace-maps*`, which clojure.main binds to true and a
-   native image leaves false.  The build gates grep this output, so the two
-   have to agree; binding it here means a phase verified on the JVM is
-   verifying the text the image will actually produce."
-  [value]
-  (binding [*print-namespace-maps* false]
-    (prn value)))
 
 (defn- a3b-smoke-command [options]
   (let [unknown (seq (remove #{:arguments :phase :project :sentinel :image}

@@ -30,10 +30,10 @@ backend that stores it; there is no migration between the two.
 `agent/project-develop`, which can change the project. `agent/project-survey`
 is read-only and `agent/project-read` is the frozen A0 surface.
 `agent/project-execute` adds `project/run`, which runs the project's own
-commands in a disposable virtual machine; it needs `--tools DIR` (or
-`BBAGENT_EXECUTOR_TOOLS`) naming the trusted tool bundle to mount, and refuses
-to start if the host's machine manager is not a version whose isolation
-behaviour has been measured. A resumed session keeps the profile it was created
+commands in a disposable virtual machine; it needs `--image ARCHIVE` (or
+`BBAGENT_EXECUTOR_IMAGE`) naming a guest built by `script/build-worker-image`,
+and refuses to start if the host's machine manager is not a version whose
+isolation behaviour has been measured. A resumed session keeps the profile it was created
 with.
 
 An OpenAI-compatible provider uses `OPENAI_API_KEY`, with endpoint and model
@@ -45,7 +45,10 @@ non-loopback host requires the explicit `--allow-insecure-http true` override or
 `BBAGENT_ALLOW_INSECURE_HTTP=true`. Provider requests do not follow redirects.
 
 Project-owned commands run in a disposable virtual machine that sees the project
-read-only and has no network. Under `agent/project-execute` the model reaches it
+read-only, has no network, and runs them as an unprivileged identity with no
+capabilities. The guest is an image this project builds and pins by digest;
+the toolchain is inside it, so the project is the only host path a machine
+ever sees. Under `agent/project-execute` the model reaches it
 through one operation:
 
 ```clojure
@@ -60,7 +63,11 @@ reported as `:project-changed` rather than as an ordinary success.
 `script/a3a-source-check.clj` is the babashka check this is dogfooded against,
 and `bb script/a3a-source-check.clj` runs it directly.
 
+Build the guest with `script/build-worker-image OUT.tar`; it bakes a static
+babashka and the guest prelude, and reports the digest to pin.
+
 See `docs/CURRENT_SCOPE.md` for current milestone boundaries,
+`docs/A3C_FINDINGS.md` for the guest and what the workload is inside it,
 `docs/A3B_FINDINGS.md` for what execution does and does not claim,
 `docs/A3A_FINDINGS.md` for the substrate underneath it, and
 `docs/architecture/0001-trusted-application-inclusion.md` for native inclusion.

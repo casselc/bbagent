@@ -492,7 +492,7 @@ TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3b-execute-smoke \
 for gate in ':version/unapproved-refused :ok' \
             ':version/override-is-recorded :ok' \
             ':version/approved-is-recognized :ok' \
-            ':version/tool-bundle-required :ok' \
+            ':version/guest-image-required :ok' \
             ':version/no-executor-no-context :ok'
 do
   if ! grep -Fq "$gate" "$BUILD_ROOT/a3b-version.edn"

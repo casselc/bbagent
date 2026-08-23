@@ -1,5 +1,14 @@
 # A3b Findings: one semantic execution capability
 
+> **Later note (A3c).** Section 5 records a property A3b measured and declined
+> to overclaim: excluded paths were hidden from the workload's ordinary view,
+> and a workload that wanted to could remount the raw export, because it was
+> root inside the machine. A3c closed that — the guest is now a pinned image
+> whose prelude drops to an unprivileged, capability-free identity after it
+> finishes mounting. **Nothing in this document has been changed to hide the
+> progression**; what it says was true of A3b and is no longer true of the
+> current substrate. See `docs/A3C_FINDINGS.md`.
+
 ## 0. For review
 
 **Verdict: PASS, recommended.** One capability, one new profile, one host-owned
@@ -59,7 +68,8 @@ prose is quoting that file.
    one. Accept, or argue for a third effect kind.
 2. Excluded paths are hidden from the workload's ordinary view and **not** from
    a root workload that remounts the export. Accept the narrower claim, or fund
-   a host-side filtered export.
+   a host-side filtered export. *(A3c did neither: it made the workload
+   unprivileged, so the narrower claim became the stronger one.)*
 3. An unrecognised machine-manager version is refused. The approved set is one
    version, because one is what has been measured.
 4. `:cwd` is validated lexically, never against the host tree — the directory
@@ -191,6 +201,9 @@ seeing a concurrent edit; that is still true, and this is the honest response to
 it rather than a fix for it.
 
 ## 5. Exclusions, and the limit of hiding
+
+> Superseded by A3c for the limit specifically; the mechanism below is
+> unchanged. What A3c added is that the workload can no longer undo it.
 
 **The invariant A3b was asked to make true:** every project path visible to the
 workload is represented in the project-input coordinate, or is intentionally
@@ -324,6 +337,8 @@ host-policy argument someone might try to pass to `project/run` are all refused.
 ## 10. Nonclaims
 
 - **Hiding is not a privilege boundary.** Section 5. The machine is the boundary.
+  *(A3c changed this: with a capability-free workload it is now enforced. The
+  machine remains the boundary that host isolation rests on.)*
 - **One manager version is approved because one has been measured.** Nothing here
   claims 1.7.6 is worse; it claims nobody has looked.
 - **The overlay's lower layer is still live.** A3a's finding stands. A3b detects
