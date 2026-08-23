@@ -68,7 +68,7 @@
            (set (map :status (vals (:negative-probes result))))))
     (is (= #{:bb4t-evaluation-failure}
             (set (map :error/category (vals (:negative-probes result))))))
-    (is (= 58 (:negative-probe/count result)))
+    (is (= 61 (:negative-probe/count result)))
     (is (every? #(contains? (:negative-probes result) %)
                 ["java.sql.Date" "java.sql.Timestamp"
                  "bbagent.journal/require" "bbagent.journal/file-store"]))
@@ -109,6 +109,13 @@
                    "bbagent.executor/approved-versions"
                    "bbagent.bb4t/require"
                    "bbagent.bb4t/create"])))
+    (testing "and neither does moving the guest into an image"
+      ;; A3c selects the guest and derives the workload's identity on the
+      ;; host. Neither is reachable, and neither is the archive on disk.
+      (is (every? #(contains? (:negative-probes result) %)
+                  ["bbagent.executor/project-identity"
+                   "bbagent.worker/guest-prelude"
+                   "bbagent.worker-image/require"])))
     (is (false? (:forbidden-database/created? result)))))
 
 (deftest frozen-a0-profile-is-unchanged-test

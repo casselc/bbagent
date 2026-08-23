@@ -4,9 +4,11 @@
    These tests boot a real virtual machine.  They are slow by the standards
    of the rest of the suite and that is the point: an isolation boundary
    asserted against a stub proves the stub."
-  (:require [bbagent.process :as process]
+  (:require [bbagent.executor :as executor]
+            [bbagent.process :as process]
             [bbagent.snapshot :as snapshot]
             [bbagent.worker :as worker]
+            [bbagent.worker-image :as worker-image]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]])
@@ -39,6 +41,11 @@
 (defn- run!! [root argv & [options]]
   (worker/execute! (merge {:project-root root
                            :argv argv
+                           :image @worker-image/path
+                           ;; Derived exactly as the executor derives it, so
+                           ;; these tests exercise the identity the product
+                           ;; would actually use rather than one they chose.
+                           :identity (executor/project-identity root)
                            :limits {:worker/timeout-ms 60000}}
                           options)))
 
@@ -422,14 +429,47 @@
       (is (= (:snapshot/coordinate manifest)
              (:project/input-coordinate result))))))
 
-(deftest hiding-is-not-a-privilege-boundary-test
-  ;; Recorded rather than glossed.  The workload is root inside the machine
-  ;; and can put the export back; what protects the host is the machine, not
-  ;; the guest's mount table.  A3b claims the weaker property, and this is
-  ;; the test that keeps the claim honest by demonstrating its limit.
-  (let [root (project! "adversarial" {"README.md" "tracked"
-                                      ".git/config" "secret-git-config"})
-        result (run!! root (shell "umount /input && cat /input/.git/config"))]
-    (is (= :completed (:status result)))
-    (is (str/includes? (:stdout result) "secret-git-config")
-        "if this ever fails, hiding became stronger than A3b claimed")))
+(deftest hiding-is-enforced-not-merely-observed-test
+  ;; This test used to assert the opposite. Under A3a and A3b the workload was
+  ;; root inside the machine and could put the raw export back, so the honest
+  ;; claim was that hiding held for a workload that was merely running. A3c
+  ;; moved the guest into an image whose prelude drops privilege after it
+  ;; mounts, and the workload now holds no capabilities at all -- so the
+  ;; thing that used to demonstrate the limit is the thing that proves it is
+  ;; gone.
+  (let [root (project! "enforced" {"README.md" "tracked"
+                                   ".git/config" "secret-git-config"})
+        result (run!! root (shell (str "umount /input 2>&1; "
+                                       "echo umount-attempted; "
+                                       "cat /input/.git/config 2>&1; "
+                                       "grep CapEff /proc/self/status; "
+                                       "id -u")))
+        stdout (str (:stdout result))]
+    (is (= :completed (:status result)) (pr-str result))
+    (is (re-find #"(?i)not permitted|must be superuser|permission denied" stdout)
+        "the workload was able to unmount the raw project export")
+    (is (not (str/includes? stdout "secret-git-config"))
+        "the workload read a file the input coordinate does not describe")
+    (is (str/includes? stdout "CapEff:\t0000000000000000")
+        "the workload holds capabilities it should have given up")
+    (is (not= "0" (str/trim (last (str/split-lines stdout))))
+        "the workload is running as root")))
+
+(deftest a-root-identity-is-refused-test
+  ;; The prelude refuses it too, but this fails before a machine is started.
+  (let [root (project! "root-identity" {"README.md" "fixture"})]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"non-root uid"
+                          (worker/execute! {:project-root root
+                                            :image @worker-image/path
+                                            :identity {:uid 0 :gid 0}
+                                            :argv ["/bin/true"]})))))
+
+(deftest a-guest-image-is-required-test
+  (let [root (project! "no-image" {"README.md" "fixture"})]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"requires a guest image"
+                          (worker/execute!
+                           {:project-root root
+                            :identity (executor/project-identity root)
+                            :argv ["/bin/true"]})))))

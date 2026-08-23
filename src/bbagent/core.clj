@@ -4,6 +4,7 @@
             [bbagent.provider :as provider]
             [bbagent.a3a-smoke :as a3a-smoke]
             [bbagent.a3b-smoke :as a3b-smoke]
+            [bbagent.a3c-smoke :as a3c-smoke]
             [bbagent.worker :as worker]
             [bbagent.s0b-smoke :as s0b-smoke]
             [bbagent.session :as session]
@@ -93,8 +94,14 @@
    directory to mount would be a way to read the host wearing an execution
    capability's clothes, whatever the machine boundary did afterwards."
   [options]
-  {:tools (or (:tools options)
-              (System/getenv "BBAGENT_EXECUTOR_TOOLS"))
+  {:image (or (:image options)
+              (System/getenv "BBAGENT_EXECUTOR_IMAGE"))
+   :image-digest (or (:image-digest options)
+                     (System/getenv "BBAGENT_EXECUTOR_IMAGE_DIGEST"))
+   :project-root (or (:project options) ".")
+   :allow-privileged?
+   (true-value? (or (:allow-privileged options)
+                    (System/getenv "BBAGENT_EXECUTOR_ALLOW_PRIVILEGED")))
    :allow-unapproved-version?
    (true-value? (or (:allow-unapproved-worker options)
                     (System/getenv "BBAGENT_EXECUTOR_ALLOW_UNAPPROVED")))})
@@ -252,7 +259,7 @@
       (throw (ex-info "S0b smoke requires a known --phase" {:phase phase})))))
 
 (defn- a3a-smoke-command [options]
-  (let [unknown (seq (remove #{:arguments :phase :project :sentinel :tools}
+  (let [unknown (seq (remove #{:arguments :phase :project :sentinel :image}
                              (keys options)))
         phase (:phase options)]
     (when unknown
@@ -261,20 +268,21 @@
       (throw (ex-info "A3a smoke does not accept positional arguments" {})))
     (when-not (:project options)
       (throw (ex-info "A3a smoke requires --project PATH" {})))
-    (case phase
-      "probe" (do
-                (when-not (:sentinel options)
-                  (throw (ex-info "A3a probe requires --sentinel PATH" {})))
-                (prn (a3a-smoke/probe! {:project-root (:project options)
-                                        :outside-sentinel (:sentinel options)})))
-      "timeout" (prn (a3a-smoke/timeout! {:project-root (:project options)}))
-      "dogfood" (do
-                  (when-not (:tools options)
-                    (throw (ex-info "A3a dogfood requires --tools PATH" {})))
-                  (prn (a3a-smoke/dogfood! {:project-root (:project options)
-                                            :tools [(:tools options)]})))
-      "describe" (prn (worker/describe))
-      (throw (ex-info "A3a smoke requires a known --phase" {:phase phase})))))
+    (when-not (:image options)
+      (throw (ex-info "A3a smoke requires --image ARCHIVE" {})))
+    (let [settings {:project-root (:project options)
+                    :image (:image options)
+                    :outside-sentinel (:sentinel options)}]
+      (case phase
+        "probe" (do
+                  (when-not (:sentinel options)
+                    (throw (ex-info "A3a probe requires --sentinel PATH" {})))
+                  (prn (a3a-smoke/probe! settings)))
+        "timeout" (prn (a3a-smoke/timeout! settings))
+        "dogfood" (prn (a3a-smoke/dogfood! settings))
+        "describe" (prn (worker/describe))
+        (throw (ex-info "A3a smoke requires a known --phase"
+                        {:phase phase}))))))
 
 (defn- emit-evidence!
   "Prints one evidence map the same way everywhere.
@@ -289,11 +297,11 @@
     (prn value)))
 
 (defn- a3b-smoke-command [options]
-  (let [unknown (seq (remove #{:arguments :phase :project :sentinel :tools}
+  (let [unknown (seq (remove #{:arguments :phase :project :sentinel :image}
                              (keys options)))
         phase (:phase options)
         settings {:project-root (:project options)
-                  :tools (:tools options)
+                  :image (:image options)
                   :outside-sentinel (:sentinel options)}]
     (when unknown
       (throw (ex-info "Unknown A3b smoke options" {:options (vec unknown)})))
@@ -301,8 +309,8 @@
       (throw (ex-info "A3b smoke does not accept positional arguments" {})))
     (when-not (:project options)
       (throw (ex-info "A3b smoke requires --project PATH" {})))
-    (when-not (:tools options)
-      (throw (ex-info "A3b smoke requires --tools PATH" {})))
+    (when-not (:image options)
+      (throw (ex-info "A3b smoke requires --image ARCHIVE" {})))
     (case phase
       "describe" (emit-evidence! (a3b-smoke/describe! settings))
       "version" (emit-evidence! (a3b-smoke/version! settings))
@@ -316,6 +324,27 @@
       "dogfood" (emit-evidence! (a3b-smoke/dogfood! settings))
       (throw (ex-info "A3b smoke requires a known --phase" {:phase phase})))))
 
+(defn- a3c-smoke-command [options]
+  (let [unknown (seq (remove #{:arguments :phase :project :image}
+                             (keys options)))
+        phase (:phase options)
+        settings {:project-root (:project options) :image (:image options)}]
+    (when unknown
+      (throw (ex-info "Unknown A3c smoke options" {:options (vec unknown)})))
+    (when (seq (:arguments options))
+      (throw (ex-info "A3c smoke does not accept positional arguments" {})))
+    (when-not (:project options)
+      (throw (ex-info "A3c smoke requires --project PATH" {})))
+    (when-not (:image options)
+      (throw (ex-info "A3c smoke requires --image ARCHIVE" {})))
+    (case phase
+      "describe" (emit-evidence! (a3c-smoke/describe! settings))
+      "privilege" (emit-evidence! (a3c-smoke/privilege! settings))
+      "image" (emit-evidence! (a3c-smoke/image! settings))
+      "contract" (emit-evidence! (a3c-smoke/contract! settings))
+      "dogfood" (emit-evidence! (a3c-smoke/dogfood! settings))
+      (throw (ex-info "A3c smoke requires a known --phase" {:phase phase})))))
+
 (defn- usage []
   (str "bbagent tui [SESSION_ID] [--project PATH] [--store file|sqlite]\n"
        "bbagent run [--project PATH] [--store file|sqlite] [provider options]\n"
@@ -324,8 +353,9 @@
         "bbagent inspect SESSION_ID [--state PATH] [--store file|sqlite]\n"
         "bbagent s0a-sqlite-smoke --database PATH --project PATH\n"
         "bbagent s0b-native-smoke --phase PHASE --state PATH --session ID [--project PATH]\n"
-        "bbagent a3a-worker-smoke --phase PHASE --project PATH [--tools PATH]\n"
-        "bbagent a3b-execute-smoke --phase PHASE --project PATH --tools PATH\n"
+        "bbagent a3a-worker-smoke --phase PHASE --project PATH --image ARCHIVE\n"
+        "bbagent a3b-execute-smoke --phase PHASE --project PATH --image ARCHIVE\n"
+        "bbagent a3c-guest-smoke --phase PHASE --project PATH --image ARCHIVE\n"
        "--profile agent/project-read|agent/project-survey|\n"
        "          agent/project-develop|agent/project-execute\n"
        "  selects the capability surface and defaults to\n"
@@ -333,9 +363,9 @@
        "  agent/project-survey is read-only and agent/project-read is the\n"
        "  frozen A0 surface. agent/project-execute adds project/run, which\n"
        "  runs the project's own commands in a disposable machine, and needs\n"
-       "  --tools DIR (or BBAGENT_EXECUTOR_TOOLS) naming the trusted tool\n"
-       "  bundle to mount. A resumed session keeps the profile it was\n"
-       "  created with\n"
+       "  --image ARCHIVE (or BBAGENT_EXECUTOR_IMAGE) naming the worker guest\n"
+       "  image built by script/build-worker-image; --image-digest pins it.\n"
+       "  A resumed session keeps the profile it was created with\n"
        "--orientation none|minimal|generated|grounded|derived selects the\n"
        "  model capability preamble; it adds no authority and defaults to\n"
        "  derived, which generates its claims from the granted surface\n"
@@ -366,6 +396,7 @@
       "s0b-native-smoke" (s0b-smoke-command options)
       "a3a-worker-smoke" (a3a-smoke-command options)
       "a3b-execute-smoke" (a3b-smoke-command options)
+      "a3c-guest-smoke" (a3c-smoke-command options)
       "describe" (prn {:application :bbagent
                          :scope :a1
                          :surface :persistent-sci})

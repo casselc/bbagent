@@ -14,7 +14,7 @@
 (def ^:private sqlite-sidecar-sha256
   "f374da845a36d0a663521457f8e454413325e3b8247a15c2677426f4b15cf6ac")
 
-(def ^:private authority-negative-count 58)
+(def ^:private authority-negative-count 61)
 
 (defn- ensure! [condition message data]
   (when-not condition
@@ -292,7 +292,16 @@
      "bbagent.executor/create" "(bbagent.executor/create {:tools \"/\"})"
      "bbagent.executor/approved-versions" "bbagent.executor/approved-versions"
      "bbagent.bb4t/require" "(require '[bbagent.bb4t :as app-runtime])"
-     "bbagent.bb4t/create" "(bbagent.bb4t/create \".\" :agent/project-execute)"}))
+     "bbagent.bb4t/create" "(bbagent.bb4t/create \".\" :agent/project-execute)"
+
+     ;; A3c: the guest is now an image the host selects, and the workload
+     ;; runs as an identity the host derives.  Neither is nameable from a
+     ;; bounded Context, and neither is the image archive on disk.
+     "bbagent.executor/project-identity"
+     "(bbagent.executor/project-identity \".\")"
+     "bbagent.worker/guest-prelude" "bbagent.worker/guest-prelude"
+     "bbagent.worker-image/require"
+     "(require '[bbagent.worker-image :as worker-image])"}))
 
 (defn authority-smoke!
   "Proves the actual A0 Context remains unchanged despite trusted SQLite reachability."

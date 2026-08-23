@@ -18,9 +18,9 @@
 
 (defn- verdict [ok?] (if ok? :ok :failed))
 
-(defn- session! [{:keys [project-root tools]}]
+(defn- session! [{:keys [project-root image]}]
   (app-runtime/create project-root :agent/project-execute
-                      {:executor {:tools tools}}))
+                      {:executor {:image image :project-root project-root}}))
 
 (defn- evaluate [app source]
   (let [result (app-runtime/evaluate app source)]
@@ -45,7 +45,7 @@
 (defn describe!
   "What execution environment this host can authorize, and what names it."
   [options]
-  (let [environment (executor/create {:tools (:tools options)})
+  (let [environment (executor/create {:image (:image options)})
         {:keys [description coordinate]} (execution/describe environment)]
     {:executor/coordinate coordinate
      :executor/description description
@@ -53,9 +53,9 @@
 
 (defn version!
   "An unmeasured machine manager is refused rather than assumed equivalent."
-  [{:keys [tools]}]
+  [{:keys [image]}]
   (let [refused (try
-                  (executor/create {:tools tools
+                  (executor/create {:image image
                                     :approved-versions #{"0.0.0-not-this-one"}})
                   :created
                   (catch Exception failure (ex-message failure)))
@@ -63,15 +63,15 @@
                      (:executor/approval
                       (:description
                        (execution/describe
-                        (executor/create {:tools tools
+                        (executor/create {:image image
                                           :approved-versions #{"0.0.0-nope"}
                                           :allow-unapproved-version? true}))))
                      (catch Exception failure (ex-message failure)))
         approved (:executor/approval
                   (:description
-                   (execution/describe (executor/create {:tools tools}))))
+                   (execution/describe (executor/create {:image image}))))
         missing-bundle (try
-                         (executor/create {:tools nil})
+                         (executor/create {:image nil})
                          :created
                          (catch Exception failure (ex-message failure)))]
     {:version/approved-set (vec (sort executor/approved-versions))
@@ -80,20 +80,20 @@
                    (str/includes? refused "has not been measured")))
      :version/override-is-recorded (verdict (= :host-override overridden))
      :version/approved-is-recognized (verdict (= :recognized approved))
-     :version/tool-bundle-required
+     :version/guest-image-required
      (verdict (and (string? missing-bundle)
-                   (str/includes? missing-bundle "tool bundle")))
+                   (str/includes? missing-bundle "guest image")))
      :version/no-executor-no-context
      (verdict (try
                 (app-runtime/create "." :agent/project-execute
-                                    {:executor {:tools nil}})
+                                    {:executor {:image nil}})
                 false
                 (catch Exception _ true)))}))
 
 (defn authority!
   "The new profile gains one operation and nothing else."
-  [{:keys [project-root tools]}]
-  (let [app (session! {:project-root project-root :tools tools})
+  [{:keys [project-root image]}]
+  (let [app (session! {:project-root project-root :image image})
         description (:context/description app)
         surface (:context/surface description)
         grants (get-in description [:context/effective :context/grants])
@@ -118,6 +118,10 @@
                ;; The host settings a run is bounded by are not arguments.
                "project/run tools"
                "(project/run {:argv [\"true\"] :tools \"/home\"})"
+               "project/run image"
+               "(project/run {:argv [\"true\"] :image \"/home/img.tar\"})"
+               "project/run identity"
+               "(project/run {:argv [\"true\"] :identity {:uid 0 :gid 0}})"
                "project/run project-root"
                "(project/run {:argv [\"true\"] :project-root \"/\"})"
                "project/run environment"
@@ -162,8 +166,8 @@
 
 (defn probe!
   "The A3a isolation properties, re-proven from where the model stands."
-  [{:keys [project-root tools outside-sentinel]}]
-  (let [app (session! {:project-root project-root :tools tools})
+  [{:keys [project-root image outside-sentinel]}]
+  (let [app (session! {:project-root project-root :image image})
         executor-coordinate
         (get-in app [:context/description :context/effective :context/resources
                      :executor :execution/coordinate])
@@ -236,8 +240,8 @@
 
 (defn unstable!
   "A project that moved while a command ran is not a verified project."
-  [{:keys [project-root tools]}]
-  (let [app (session! {:project-root project-root :tools tools})
+  [{:keys [project-root image]}]
+  (let [app (session! {:project-root project-root :image image})
         moved (future
                 (Thread/sleep 2500)
                 (spit (io/file project-root "src" "moved.txt")
@@ -262,8 +266,8 @@
 
 (defn replay!
   "Recovery reconstructs what a run returned, and never runs it again."
-  [{:keys [project-root tools]}]
-  (let [environment (executor/create {:tools tools})
+  [{:keys [project-root image]}]
+  (let [environment (executor/create {:image image})
         make (fn [] (app-runtime/create project-root :agent/project-execute
                                         {:environment environment}))
         source (str "(def verification (project/run {:argv [\"bb\" \"--version\"]"
@@ -298,8 +302,8 @@
 
 (defn dogfood!
   "A real project, a real check, chosen and run the way a model would."
-  [{:keys [project-root tools]}]
-  (let [app (session! {:project-root project-root :tools tools})
+  [{:keys [project-root image]}]
+  (let [app (session! {:project-root project-root :image image})
         exclusions (conj snapshot/default-exclusions ".cpcache" "target")
         before (snapshot/manifest project-root {:exclusions exclusions})
         ;; Composed rather than called: the product thesis is that the model

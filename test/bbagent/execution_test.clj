@@ -115,7 +115,7 @@
   (let [failure (try
                   (app-runtime/create (temp-project) :agent/project-execute
                                       {:environment nil
-                                       :executor {:tools "/nonexistent"}})
+                                       :executor {:image "/nonexistent/guest.tar"}})
                   (catch Exception failure failure))]
     (is (instance? Exception failure)
         "an executing profile was created with no execution environment")))
@@ -411,4 +411,4 @@
                                   :session-id "execution-refused"
                                   :store-backend :file
                                   :profile :agent/project-execute
-                                  :executor {:tools "/nonexistent/bundle"}})))))
+                                  :executor {:image "/nonexistent/guest.tar"}})))))

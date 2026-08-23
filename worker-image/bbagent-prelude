@@ -1,0 +1,81 @@
+#!/bin/sh
+# The guest side of the execution boundary.
+#
+# This lives in the image rather than in a string the host assembles, so the
+# image digest covers the sequence that builds the workspace, hides what the
+# input coordinate does not describe, and drops privilege.  The host passes
+# data and nothing else: a contract version, the identity to run as, the
+# paths to hide, a working directory, and the command.
+#
+#   bbagent-prelude CONTRACT UID:GID N [PATH...] CWD ARGV...
+#
+# Every step that fails exits 125 with a marker, because a command that could
+# not be started did not fail -- it did not run, and the host has to be able
+# to tell those apart without guessing what a bare status meant.
+
+set -u
+
+CONTRACT=1
+MARKER="bbagent-worker: prelude failed: "
+
+fail() {
+  echo "$MARKER$1" >&2
+  exit 125
+}
+
+# Checked before anything is mounted.  A host binary and an image that
+# disagree about this argument order would otherwise mount a workspace and
+# then run the wrong thing in it.
+[ "${1:-}" = "$CONTRACT" ] || fail "contract"
+shift
+
+identity="$1"; shift
+uid="${identity%%:*}"
+gid="${identity##*:}"
+case "$uid" in ''|*[!0-9]*) fail "identity" ;; esac
+case "$gid" in ''|*[!0-9]*) fail "identity" ;; esac
+[ "$uid" != "0" ] || fail "identity-is-root"
+
+mkdir -p /storage/upper /storage/work /work /storage/home || fail "workspace"
+# The merged workspace takes its ownership from the upper layer, so the
+# workload cannot create anything at the root of its own workspace unless
+# the upper layer belongs to it.
+chown "$uid:$gid" /storage/upper /storage/home || fail "own"
+
+mount -t overlay overlay \
+  -o lowerdir=/input,upperdir=/storage/upper,workdir=/storage/work \
+  /work || fail "overlay"
+
+# Removing a path that exists only in the read-only lower layer writes a
+# whiteout into the upper one.  Nothing on the host is touched.
+hidden="$1"; shift
+while [ "$hidden" -gt 0 ]
+do
+  rm -rf "/work/$1" || fail "hide"
+  shift
+  hidden=$((hidden - 1))
+done
+
+# The raw project export is the overlay's lower layer and would otherwise be
+# readable at its own path.  The overlay keeps its own reference to it, so
+# covering the mount point costs nothing -- and after the drop below, the
+# workload has no capability with which to uncover it.
+mount -t tmpfs -o size=4k tmpfs /input || fail "mask"
+
+cd "/work/$1" || fail "cwd"
+shift
+
+# Everything above needed CAP_SYS_ADMIN.  Nothing below does.
+#
+# The inner shell is not decoration.  su-exec exits 1 when it cannot exec
+# what it was given, which is indistinguishable from a program that ran and
+# chose to exit 1; a shell reports 127 for a command that does not exist,
+# and telling those apart is the whole reason this prelude exits 125 for its
+# own failures.
+#
+# HOME is set on the far side of the drop, not before it: su-exec resets it
+# from the passwd file, and the identity this runs as is a uid the image has
+# never heard of, so it would otherwise land on / and every tool that writes
+# to HOME would fail on a filesystem the workload cannot write.
+exec su-exec "$uid:$gid" /bin/sh -c \
+  'HOME=/storage/home; export HOME; exec "$@"' bbagent-worker "$@"

@@ -257,7 +257,7 @@ fi
 TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" s0a-sqlite-smoke \
   --database "$BUILD_ROOT/s0b-authority.db" --project "$S0B_PROJECT" \
   > "$BUILD_ROOT/s0b-authority.edn"
-if ! grep -Fq ':negative-probe/count 58' "$BUILD_ROOT/s0b-authority.edn" || \
+if ! grep -Fq ':negative-probe/count 61' "$BUILD_ROOT/s0b-authority.edn" || \
    ! grep -Fq 'java.sql.Date' "$BUILD_ROOT/s0b-authority.edn" || \
    ! grep -Fq 'java.sql.Timestamp' "$BUILD_ROOT/s0b-authority.edn" || \
    ! grep -Fq 'bbagent.journal/file-store' "$BUILD_ROOT/s0b-authority.edn" || \
@@ -333,7 +333,10 @@ for negative in 'bbagent.worker/require' \
                 'bb4t.execution/describe' \
                 'bbagent.executor/require' \
                 'bbagent.executor/create' \
-                'bbagent.bb4t/create'
+                'bbagent.bb4t/create' \
+                'bbagent.executor/project-identity' \
+                'bbagent.worker/guest-prelude' \
+                'bbagent.worker-image/require'
 do
   if ! grep -Fq "$negative" "$BUILD_ROOT/s0b-authority.edn"
   then
@@ -355,17 +358,28 @@ fi
 
 A3A_PROJECT="$BUILD_ROOT/a3a-project"
 A3A_OUTSIDE="$BUILD_ROOT/a3a-outside"
-A3A_TOOLS="$BUILD_ROOT/a3a-tools"
-mkdir -p "$A3A_PROJECT/src" "$A3A_OUTSIDE" "$A3A_TOOLS"
+mkdir -p "$A3A_PROJECT/src" "$A3A_OUTSIDE"
 printf 'original\n' > "$A3A_PROJECT/src/a.txt"
 printf 'keep me\n' > "$A3A_PROJECT/src/b.txt"
 printf 'SENTINEL-OUTSIDE-THE-PROJECT\n' > "$A3A_OUTSIDE/host-secret.txt"
-install -m 0755 "$(command -v bb)" "$A3A_TOOLS/bb"
 smolvm --version > "$BUILD_ROOT/a3a-smolvm-version.txt"
 bb --version > "$BUILD_ROOT/a3a-bb-version.txt"
 
+# A3c: the guest is an image built from the same pinned checkout as the
+# binary, so the thing the evidence is about is the thing this build made.
+WORKER_IMAGE="$BUILD_ROOT/worker-image.tar"
+(cd "$BUILD_ROOT/bbagent" && script/build-worker-image "$WORKER_IMAGE") \
+  > "$BUILD_ROOT/a3c-image.txt"
+WORKER_IMAGE_SHA=$(sha256sum "$WORKER_IMAGE" | cut -d' ' -f1)
+if [ ! -s "$WORKER_IMAGE" ]
+then
+  echo "A3c: the worker guest image was not built" >&2
+  exit 1
+fi
+
 TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3a-worker-smoke \
-  --phase describe --project "$A3A_PROJECT" > "$BUILD_ROOT/a3a-describe.edn"
+  --phase describe --project "$A3A_PROJECT" --image "$WORKER_IMAGE" \
+  > "$BUILD_ROOT/a3a-describe.edn"
 if ! grep -Fq ':worker/available? true' "$BUILD_ROOT/a3a-describe.edn"
 then
   echo "A3a: the native image could not reach the machine manager" >&2
@@ -374,6 +388,7 @@ fi
 
 TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3a-worker-smoke \
   --phase probe --project "$A3A_PROJECT" \
+  --image "$WORKER_IMAGE" \
   --sentinel "$A3A_OUTSIDE/host-secret.txt" > "$BUILD_ROOT/a3a-probe.edn"
 for gate in ':probe/exit-zero :ok' \
             ':probe/exit-exact :ok' \
@@ -409,7 +424,8 @@ then
 fi
 
 TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3a-worker-smoke \
-  --phase timeout --project "$A3A_PROJECT" > "$BUILD_ROOT/a3a-timeout.edn"
+  --phase timeout --project "$A3A_PROJECT" --image "$WORKER_IMAGE" \
+  > "$BUILD_ROOT/a3a-timeout.edn"
 for gate in ':timeout/program-chose-124 :ok' \
             ':timeout/deadline-is-distinct :ok' \
             ':timeout/disposition-terminated :ok' \
@@ -429,7 +445,7 @@ done
 # revision.
 TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3a-worker-smoke \
   --phase dogfood --project "$BUILD_ROOT/bbagent" \
-  --tools "$A3A_TOOLS" > "$BUILD_ROOT/a3a-dogfood.edn"
+  --image "$WORKER_IMAGE" > "$BUILD_ROOT/a3a-dogfood.edn"
 for gate in ':dogfood/check-passed :ok' \
             ':dogfood/coordinate-recorded :ok' \
             ':dogfood/vandal-believed-it-succeeded :ok' \
@@ -461,7 +477,7 @@ printf 'SENTINEL-OUTSIDE-THE-PROJECT\n' > "$A3B_OUTSIDE/host-secret.txt"
 
 TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3b-execute-smoke \
   --phase describe --project "$A3B_PROJECT" \
-  --tools "$A3A_TOOLS" > "$BUILD_ROOT/a3b-describe.edn"
+  --image "$WORKER_IMAGE" > "$BUILD_ROOT/a3b-describe.edn"
 if ! grep -Fq ':executor/available? true' "$BUILD_ROOT/a3b-describe.edn" || \
    ! grep -Fq ':executor/approval :recognized' "$BUILD_ROOT/a3b-describe.edn" || \
    ! grep -Fq ':executor/network :none' "$BUILD_ROOT/a3b-describe.edn"
@@ -472,7 +488,7 @@ fi
 
 TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3b-execute-smoke \
   --phase version --project "$A3B_PROJECT" \
-  --tools "$A3A_TOOLS" > "$BUILD_ROOT/a3b-version.edn"
+  --image "$WORKER_IMAGE" > "$BUILD_ROOT/a3b-version.edn"
 for gate in ':version/unapproved-refused :ok' \
             ':version/override-is-recorded :ok' \
             ':version/approved-is-recognized :ok' \
@@ -488,7 +504,7 @@ done
 
 TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3b-execute-smoke \
   --phase authority --project "$A3B_PROJECT" \
-  --tools "$A3A_TOOLS" > "$BUILD_ROOT/a3b-authority.edn"
+  --image "$WORKER_IMAGE" > "$BUILD_ROOT/a3b-authority.edn"
 for gate in ':authority/profile :agent/project-execute' \
             ':authority/run-granted :ok' \
             ':authority/develop-plus-one :ok' \
@@ -506,7 +522,7 @@ do
 done
 
 TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3b-execute-smoke \
-  --phase probe --project "$A3B_PROJECT" --tools "$A3A_TOOLS" \
+  --phase probe --project "$A3B_PROJECT" --image "$WORKER_IMAGE" \
   --sentinel "$A3B_OUTSIDE/host-secret.txt" > "$BUILD_ROOT/a3b-probe.edn"
 for gate in ':probe/exit-zero :ok' \
             ':probe/exit-exact :ok' \
@@ -538,7 +554,7 @@ fi
 
 TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3b-execute-smoke \
   --phase unstable --project "$A3B_PROJECT" \
-  --tools "$A3A_TOOLS" > "$BUILD_ROOT/a3b-unstable.edn"
+  --image "$WORKER_IMAGE" > "$BUILD_ROOT/a3b-unstable.edn"
 for gate in ':unstable/status :project-changed' \
             ':unstable/not-ordinary-success :ok' \
             ':unstable/process-outcome-preserved :ok' \
@@ -554,7 +570,7 @@ done
 
 TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3b-execute-smoke \
   --phase replay --project "$A3B_PROJECT" \
-  --tools "$A3A_TOOLS" > "$BUILD_ROOT/a3b-replay.edn"
+  --image "$WORKER_IMAGE" > "$BUILD_ROOT/a3b-replay.edn"
 for gate in ':replay/one-execution :ok' \
             ':replay/replay-succeeded :ok' \
             ':replay/no-second-execution :ok' \
@@ -575,7 +591,7 @@ done
 # project/run, not a host function that calls the worker.
 TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3b-execute-smoke \
   --phase dogfood --project "$BUILD_ROOT/bbagent" \
-  --tools "$A3A_TOOLS" > "$BUILD_ROOT/a3b-dogfood.edn"
+  --image "$WORKER_IMAGE" > "$BUILD_ROOT/a3b-dogfood.edn"
 for gate in ':dogfood/check-passed :ok' \
             ':dogfood/composed-through-sci :ok' \
             ':dogfood/vandal-believed-it-succeeded :ok' \
@@ -591,6 +607,103 @@ if [ -e "$BUILD_ROOT/bbagent/WORKER-WAS-HERE.txt" ] || \
    [ ! -e "$BUILD_ROOT/bbagent/src/bbagent/worker.clj" ]
 then
   echo "A3b dogfood workload reached the authoritative checkout" >&2
+  exit 1
+fi
+
+# A3c: the guest moved into an image and the workload moved off root. The
+# gates above already re-prove A3a's and A3b's properties against it; these
+# prove the things that are new.
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3c-guest-smoke \
+  --phase describe --project "$A3B_PROJECT" \
+  --image "$WORKER_IMAGE" > "$BUILD_ROOT/a3c-describe.edn"
+for gate in ':guest/available? true' \
+            ':privilege :unprivileged' \
+            ':capabilities :none' \
+            ':prelude :in-image' \
+            ':identity :derived-from-project-owner' \
+            ':host-directory-mounted? false'
+do
+  if ! grep -Fq "$gate" "$BUILD_ROOT/a3c-describe.edn"
+  then
+    echo "A3c guest description gate failed: $gate" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq "sha256:$WORKER_IMAGE_SHA" "$BUILD_ROOT/a3c-describe.edn"
+then
+  echo "A3c: the guest description does not name the image this build made" >&2
+  exit 1
+fi
+
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3c-guest-smoke \
+  --phase privilege --project "$A3B_PROJECT" \
+  --image "$WORKER_IMAGE" > "$BUILD_ROOT/a3c-privilege.edn"
+for gate in ':privilege/not-root :ok' \
+            ':privilege/runs-as-project-owner :ok' \
+            ':privilege/no-capabilities :ok' \
+            ':privilege/cannot-unmask-input :ok' \
+            ':privilege/cannot-mount :ok' \
+            ':privilege/no-setuid-binaries :ok' \
+            ':privilege/guest-directories-readonly :ok' \
+            ':privilege/workspace-still-writable :ok'
+do
+  if ! grep -Fq "$gate" "$BUILD_ROOT/a3c-privilege.edn"
+  then
+    echo "A3c privilege gate failed: $gate" >&2
+    exit 1
+  fi
+done
+
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3c-guest-smoke \
+  --phase image --project "$A3B_PROJECT" \
+  --image "$WORKER_IMAGE" > "$BUILD_ROOT/a3c-image.edn"
+for gate in ':image/digest-recorded :ok' \
+            ':image/pinned-digest-accepted :ok' \
+            ':image/wrong-digest-refused :ok' \
+            ':image/missing-archive-refused :ok' \
+            ':image/toolchain-from-image :ok' \
+            ':image/no-host-tool-directory-mounted :ok' \
+            ':image/project-is-mounted :ok'
+do
+  if ! grep -Fq "$gate" "$BUILD_ROOT/a3c-image.edn"
+  then
+    echo "A3c image gate failed: $gate" >&2
+    exit 1
+  fi
+done
+
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3c-guest-smoke \
+  --phase contract --project "$A3B_PROJECT" \
+  --image "$WORKER_IMAGE" > "$BUILD_ROOT/a3c-contract.edn"
+for gate in ':contract/mismatch-refused :ok' \
+            ':contract/match-runs :ok' \
+            ':contract/root-identity-refused :ok'
+do
+  if ! grep -Fq "$gate" "$BUILD_ROOT/a3c-contract.edn"
+  then
+    echo "A3c contract gate failed: $gate" >&2
+    exit 1
+  fi
+done
+
+TMPDIR="$RUNTIME_TMP" "$RELOCATED/bbagent" a3c-guest-smoke \
+  --phase dogfood --project "$BUILD_ROOT/bbagent" \
+  --image "$WORKER_IMAGE" > "$BUILD_ROOT/a3c-dogfood.edn"
+for gate in ':dogfood/check-passed :ok' \
+            ':dogfood/unprivileged-toolchain-works :ok' \
+            ':dogfood/vandal-believed-it-succeeded :ok' \
+            ':dogfood/host-project-intact :ok'
+do
+  if ! grep -Fq "$gate" "$BUILD_ROOT/a3c-dogfood.edn"
+  then
+    echo "A3c dogfood gate failed: $gate" >&2
+    exit 1
+  fi
+done
+if [ -e "$BUILD_ROOT/bbagent/WORKER-WAS-HERE.txt" ] || \
+   [ ! -e "$BUILD_ROOT/bbagent/src/bbagent/worker.clj" ]
+then
+  echo "A3c dogfood workload reached the authoritative checkout" >&2
   exit 1
 fi
 
@@ -671,6 +784,10 @@ fi
     "$BUILD_ROOT/a3b-authority.edn" "$BUILD_ROOT/a3b-probe.edn" \
     "$BUILD_ROOT/a3b-unstable.edn" "$BUILD_ROOT/a3b-replay.edn" \
     "$BUILD_ROOT/a3b-dogfood.edn" \
+    "$BUILD_ROOT/a3c-describe.edn" "$BUILD_ROOT/a3c-privilege.edn" \
+    "$BUILD_ROOT/a3c-image.edn" "$BUILD_ROOT/a3c-contract.edn" \
+    "$BUILD_ROOT/a3c-dogfood.edn" "$BUILD_ROOT/a3c-image.txt" \
+    "$WORKER_IMAGE" \
     "$BUILD_ROOT/missing-sidecar.out" "$BUILD_ROOT/missing-sidecar.err" \
     "$BUILD_ROOT/mismatched-sidecar.out" \
     "$BUILD_ROOT/mismatched-sidecar.err" \

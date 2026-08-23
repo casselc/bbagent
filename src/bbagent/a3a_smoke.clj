@@ -5,7 +5,8 @@
    about the thing that ships: a native image whose reachability now
    includes a virtual machine manager, driven by trusted host code that no
    model-facing Context can name."
-  (:require [bbagent.process :as process]
+  (:require [bbagent.executor :as executor]
+            [bbagent.process :as process]
             [bbagent.snapshot :as snapshot]
             [bbagent.worker :as worker]
             [clojure.java.io :as io]
@@ -18,6 +19,17 @@
 (defn- run!! [root argv options]
   (worker/execute! (merge {:project-root root :argv argv} options)))
 
+(defn- guest
+  "The image and identity every run in this namespace uses.
+
+   A3a proved these properties against a root workload in smolvm's default
+   guest.  A3c moved the guest into an image and the workload off root, so
+   these phases now re-prove the same properties against the substrate that
+   actually ships."
+  [{:keys [image project-root]}]
+  {:image image
+   :identity (executor/project-identity project-root)})
+
 (defn- machines-running? []
   (let [result (process/execute! {:argv [worker/executable "machine" "ls"]
                                   :timeout-ms 20000
@@ -26,34 +38,36 @@
 
 (defn probe!
   "Functional behaviour, isolation, and bounds, in one machine-heavy pass."
-  [{:keys [project-root outside-sentinel]}]
-  (let [limits {:worker/timeout-ms 90000}
+  [{:keys [project-root outside-sentinel] :as settings}]
+  (let [base (guest settings)
+        limits {:worker/timeout-ms 90000}
         original (slurp (io/file project-root "src" "a.txt"))
-        zero (run!! project-root (shell "exit 0") {:limits limits})
-        exact (run!! project-root (shell "exit 42") {:limits limits})
+        zero (run!! project-root (shell "exit 0") (merge base {:limits limits}))
+        exact (run!! project-root (shell "exit 42") (merge base {:limits limits}))
         streams (run!! project-root
                        (shell "echo to-stdout; echo to-stderr >&2")
-                       {:limits limits})
+                       (merge base {:limits limits}))
         mutation (run!! project-root
                         (shell (str "echo overwritten > src/a.txt; "
                                     "rm src/b.txt; "
                                     "echo generated > src/c.txt; ls src"))
-                        {:limits limits})
+                        (merge base {:limits limits}))
         confined (run!! project-root
                         (shell (str "cat " outside-sentinel " 2>&1; "
                                     "echo rc=$?"))
-                        {:limits limits})
+                        (merge base {:limits limits}))
         network (run!! project-root
                        (shell (str "ip route | grep -c default; "
                                    "wget -T 3 -q -O- http://1.1.1.1 2>&1; "
                                    "echo wget-rc=$?"))
-                       {:limits limits})
+                       (merge base {:limits limits}))
         environment (run!! project-root (shell "env | sort")
-                           {:limits limits
-                            :environment {"BBAGENT_DECLARED" "declared-value"}})
+                           (merge base {:limits limits
+                                        :environment
+                                        {"BBAGENT_DECLARED" "declared-value"}}))
         bounded (run!! project-root
                        (shell "yes abcdefghij | head -n 20000")
-                       {:limits (assoc limits :worker/stdout-max-bytes 4096)})
+                       (merge base {:limits (assoc limits :worker/stdout-max-bytes 4096)}))
         coordinate-before (:project/input-coordinate zero)
         ;; Taken before the host edit below, not inside the result map:
         ;; the map is built after that edit has already moved the tree.
@@ -63,7 +77,7 @@
     ;; was and the sensitivity check would be asserting nothing.
     (spit (io/file project-root "src" "edited.txt")
           (str "a change the host made " (System/nanoTime)))
-    (let [after (run!! project-root (shell "cat src/edited.txt") {:limits limits})]
+    (let [after (run!! project-root (shell "cat src/edited.txt") (merge base {:limits limits}))]
       {:worker/runtime worker/executable
        :worker/version (:worker/version (worker/describe))
        :probe/exit-zero (verdict (and (= :completed (:status zero))
@@ -91,7 +105,7 @@
        :probe/environment-constructed
        (verdict (and (str/includes? (:stdout environment)
                                     "BBAGENT_DECLARED=declared-value")
-                     (str/includes? (:stdout environment) "HOME=/root")
+                     (str/includes? (:stdout environment) "HOME=/storage/home")
                      (not (re-find #"(?i)api_key|_token|_secret|password"
                                    (:stdout environment)))))
        :probe/stdout-bounded
@@ -112,11 +126,12 @@
 
 (defn timeout!
   "The deadline, and what is left running after it."
-  [{:keys [project-root]}]
-  (let [chose (run!! project-root (shell "exit 124")
-                     {:limits {:worker/timeout-ms 60000}})
+  [{:keys [project-root] :as settings}]
+  (let [base (guest settings)
+        chose (run!! project-root (shell "exit 124")
+                     (merge base {:limits {:worker/timeout-ms 60000}}))
         deadline (run!! project-root (shell "sleep 300")
-                        {:limits {:worker/timeout-ms 5000}})
+                        (merge base {:limits {:worker/timeout-ms 5000}}))
         beat (io/file project-root "..")
         heartbeat (io/file (str beat) "a3a-heartbeat")
         _ (.mkdirs heartbeat)
@@ -151,14 +166,15 @@
    The command is a babashka script the project actually keeps, checking
    invariants the project actually has, run against the working tree
    including whatever is uncommitted in it."
-  [{:keys [project-root tools]}]
+  [{:keys [project-root] :as settings}]
   (let [before (snapshot/manifest project-root
                                   {:exclusions (conj snapshot/default-exclusions
                                                      ".cpcache" "target")})
-        options {:limits {:worker/timeout-ms 180000}
-                 :tools tools
-                 :snapshot {:exclusions (conj snapshot/default-exclusions
-                                              ".cpcache" "target")}}
+        options (merge (guest settings)
+                       {:limits {:worker/timeout-ms 180000}
+                        :snapshot {:exclusions
+                                   (conj snapshot/default-exclusions
+                                         ".cpcache" "target")}})
         check (run!! project-root ["bb" "script/a3a-source-check.clj"] options)
         vandal (run!! project-root
                       (shell (str "rm -rf src/bbagent; "

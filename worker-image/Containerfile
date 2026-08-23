@@ -1,0 +1,31 @@
+# The worker guest.
+#
+# Everything the boundary depends on is here rather than on the host: the
+# prelude that builds the workspace and drops privilege, and the toolchain a
+# workload is allowed to use.  The host mounts the project read-only and
+# nothing else -- there is no tool directory to name, which is the point.
+#
+# The image does not set USER.  The prelude needs CAP_SYS_ADMIN to mount the
+# overlay and gives it up itself; an image that dropped privilege at entry
+# would never get the workspace built.
+FROM alpine:3.20
+
+# su-exec, not busybox setpriv: busybox's applet cannot change uid at all,
+# and util-linux's replaces busybox mount with a setuid binary, which is a
+# thing this image is trying not to have.
+RUN apk add --no-cache su-exec
+
+COPY bb /opt/bbagent-tools/bb
+COPY bbagent-prelude /usr/local/bin/bbagent-prelude
+
+RUN chmod 0755 /opt/bbagent-tools/bb /usr/local/bin/bbagent-prelude \
+ # The workload runs as a uid that is not root and not in the image's
+ # passwd file. These directories are root's; nothing the workload does
+ # should be able to change what the next command in this machine sees,
+ # even though the machine is thrown away either way.
+ && chmod 0755 /etc /usr/bin /usr/sbin /usr/local/bin /root \
+ # A setuid binary is the ordinary way back to root from an unprivileged
+ # uid. There should not be one; this makes that a property of the build
+ # rather than of what alpine happened to ship.
+ && test -z "$(find / -xdev -perm -4000 -type f)" \
+ && test -z "$(find / -xdev -perm -2000 -type f)"

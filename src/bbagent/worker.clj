@@ -16,6 +16,7 @@
            v
         /work                           writable, dies with the machine
            |  excluded paths whited out
+           |  privilege dropped here    no capabilities past this line
            v
         argv
 
@@ -26,11 +27,15 @@
 
    What the workload sees is what the input coordinate describes.  Paths
    the snapshot excluded are removed from the workspace and the raw export
-   is covered, so a command cannot read a part of the project that its own
-   result does not account for.  This holds for a workload that is merely
-   running; it is not a privilege boundary.  The workload is root inside
-   the machine and can put the export back, which is why the machine, and
-   not the guest mount table, is what the isolation rests on."
+   is covered, and the workload then runs with no capabilities at all, so
+   it cannot uncover them.  That is a property of the guest now rather than
+   of the workload's good manners; the machine is still the boundary the
+   isolation rests on, and this is defence in depth behind it.
+
+   The guest side of all of that lives in the image, not here.  This
+   namespace hands smolvm an image and some data -- what to hide, who to
+   run as, where to start, what to run -- and the image digest covers the
+   rest."
   (:require [bbagent.process :as process]
             [bbagent.snapshot :as snapshot]
             [clojure.string :as str])
@@ -46,6 +51,18 @@
 (def guest-input "/input")
 (def guest-work "/work")
 (def guest-tools "/opt/bbagent-tools")
+
+(def guest-prelude
+  "Where the image keeps its half of the boundary."
+  "/usr/local/bin/bbagent-prelude")
+
+(def prelude-contract
+  "The argument order the host and the image have to agree on.
+
+   Checked by the prelude before it mounts anything.  A binary and an image
+   that disagreed would otherwise build a workspace and then run the wrong
+   thing inside it, which is a worse failure than not starting."
+  "1")
 
 (def prelude-exit
   "The exit status the guest prelude uses when it never reached the argv.
@@ -79,9 +96,12 @@
    machine manager is that it forwards no host environment at all, so
    nothing is being removed here and nothing needs to be: whatever is in
    this map is the whole environment, and a host credential cannot be
-   omitted from it by accident."
-  {"HOME" "/root"
-   "TMPDIR" "/tmp"
+   omitted from it by accident.
+
+   HOME is absent deliberately.  The workload does not run as root and has
+   no business in root's home, so the prelude points it at a directory it
+   owns; naming one here would only be a value the guest overrides."
+  {"TMPDIR" "/tmp"
    "LANG" "C.UTF-8"
    "PATH" (str guest-tools
                ":/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")})
@@ -90,40 +110,6 @@
 
 (defn- fail! [message data]
   (throw (ex-info message (assoc data :bbagent/error :worker-invalid))))
-
-(def ^:private prelude
-  ;; Positional parameters carry the hidden paths, the working directory and
-  ;; the argv, so no part of a caller's command is ever interpolated into
-  ;; shell source.  The layout is: a count, that many paths, the cwd, argv.
-  (str/join
-   "\n"
-   ["set -u"
-    (str "mkdir -p /storage/upper /storage/work " guest-work " 2>/dev/null ||"
-         " { echo \"" prelude-marker "workspace\" >&2; exit " prelude-exit "; }")
-    (str "mount -t overlay overlay -o"
-         " lowerdir=" guest-input ",upperdir=/storage/upper,workdir=/storage/work"
-         " " guest-work " 2>/dev/null ||"
-         " { echo \"" prelude-marker "overlay\" >&2; exit " prelude-exit "; }")
-    ;; Removing a path that exists only in the read-only lower layer writes a
-    ;; whiteout into the upper one.  Nothing on the host is touched; the
-    ;; workspace simply stops having it.
-    "hidden=\"$1\"; shift"
-    "while [ \"$hidden\" -gt 0 ]; do"
-    (str "  rm -rf \"" guest-work "/$1\" 2>/dev/null ||"
-         " { echo \"" prelude-marker "hide\" >&2; exit " prelude-exit "; }")
-    "  shift"
-    "  hidden=$((hidden - 1))"
-    "done"
-    ;; The raw project export is the overlay's lower layer and is otherwise
-    ;; readable at its own path, which would put the excluded paths back
-    ;; within reach of an ordinary command.  The overlay keeps its own
-    ;; reference to it, so covering the mount point costs nothing.
-    (str "mount -t tmpfs -o size=4k tmpfs " guest-input " 2>/dev/null ||"
-         " { echo \"" prelude-marker "mask\" >&2; exit " prelude-exit "; }")
-    (str "cd \"" guest-work "/$1\" 2>/dev/null ||"
-         " { echo \"" prelude-marker "cwd\" >&2; exit " prelude-exit "; }")
-    "shift"
-    "exec \"$@\""]))
 
 (defn- validated-hidden
   "The paths the workspace must not contain.
@@ -177,32 +163,57 @@
    {}
    (or environment {})))
 
-(defn- validated-tools [tools]
-  (mapv (fn [tool]
-          (let [^Path path (Paths/get (str tool) (make-array String 0))]
-            (when-not (.isAbsolute path)
-              (fail! "Worker tool directory must be an absolute path"
-                     {:worker/tool (str tool)}))
-            (str (.toRealPath path (make-array LinkOption 0)))))
-        (or tools [])))
+(defn- validated-image
+  "The guest image archive, as a path smolvm can be handed.
+
+   There is no longer a tool directory to validate.  The toolchain is inside
+   the image, so the one host path this worker mounts is the project, and a
+   caller cannot name a second one."
+  [image]
+  (when (str/blank? (str image))
+    (fail! "Worker requires a guest image archive" {}))
+  (let [^Path path (Paths/get (str image) (make-array String 0))]
+    (when-not (.isAbsolute path)
+      (fail! "Worker guest image must be an absolute path"
+             {:worker/image (str image)}))
+    (str (.toRealPath path (make-array LinkOption 0)))))
+
+(defn- validated-identity
+  "The uid and gid the workload runs as.
+
+   Not root, and not a host identity the caller picked: the executor derives
+   it from the project the run is against, because the overlay's permissions
+   are the project's permissions and a workload whose uid does not match
+   them cannot write to its own workspace."
+  [identity]
+  (let [{:keys [uid gid]} identity]
+    (when-not (and (integer? uid) (integer? gid) (pos? uid) (not (neg? gid)))
+      (fail! "Worker identity must be a non-root uid and a gid"
+             {:worker/identity identity}))
+    (str uid ":" gid)))
 
 (defn- machine-argv
-  [{:keys [root cwd argv environment tools limits hidden]}]
+  "The manager command line: an image, one read-only mount, and data.
+
+   The guest command is the image's own prelude followed by arguments, not
+   shell source assembled here.  Nothing a caller supplies is interpolated
+   into anything that gets parsed."
+  [{:keys [root cwd argv environment image identity contract limits hidden]}]
   (into
    (into
-    (into
-     (into ["machine" "run"
-            ;; Behind bbagent's own deadline; see teardown-grace-ms.
-            "--timeout" (str (+ (:worker/timeout-ms limits) teardown-grace-ms) "ms")
-            "--cpus" (str (:worker/cpus limits))
-            "--mem" (str (:worker/memory-mib limits))
-            ;; No --net.  Outbound networking is off unless it is asked for,
-            ;; and A3a never asks.
-            "-v" (str root ":" guest-input ":ro")]
-           (mapcat (fn [tool] ["-v" (str tool ":" guest-tools ":ro")]) tools))
-     (mapcat (fn [[k v]] ["-e" (str k "=" v)]) (sort guest-environment)))
+    (into ["machine" "run"
+           "--image" image
+           ;; Behind bbagent's own deadline; see teardown-grace-ms.
+           "--timeout" (str (+ (:worker/timeout-ms limits) teardown-grace-ms) "ms")
+           "--cpus" (str (:worker/cpus limits))
+           "--mem" (str (:worker/memory-mib limits))
+           ;; No --net.  Outbound networking is off unless it is asked for,
+           ;; and nothing here asks.  The project is the only host path
+           ;; mounted, because the toolchain is in the image.
+           "-v" (str root ":" guest-input ":ro")]
+          (mapcat (fn [[k v]] ["-e" (str k "=" v)]) (sort guest-environment)))
     (mapcat (fn [[k v]] ["-e" (str k "=" v)]) (sort environment)))
-   (-> ["--" "/bin/sh" "-c" prelude "bbagent-worker" (str (count hidden))]
+   (-> ["--" guest-prelude contract identity (str (count hidden))]
        (into hidden)
        (conj cwd)
        (into argv))))
@@ -256,7 +267,8 @@
    and the project input coordinate is present only when the project did
    not change while the workload was running: a coordinate that names a
    tree the run did not entirely see would be worse than no coordinate."
-  [{:keys [project-root argv cwd environment tools limits snapshot events]}]
+  [{:keys [project-root argv cwd environment image identity limits snapshot
+           events contract]}]
   (when-not (and (sequential? argv) (seq argv)
                  (every? #(and (string? %) (not (str/blank? %))) argv))
     (fail! "Worker argv must be a non-empty vector of non-blank strings"
@@ -264,7 +276,11 @@
   (let [limits (merge default-limits limits)
         cwd (validated-cwd cwd)
         environment (validated-environment environment)
-        tools (validated-tools tools)
+        image (validated-image image)
+        identity (validated-identity identity)
+        ;; Overridable only so the mismatch can be proved rather than
+        ;; reasoned about; nothing but an evidence phase ever passes it.
+        contract (or contract prelude-contract)
         before (snapshot/manifest project-root snapshot)
         root (:snapshot/root before)
         ;; The workspace hides exactly what the manifest refused to describe.
@@ -274,13 +290,15 @@
         hidden (validated-hidden (:snapshot/excluded-paths before))
         emit (fn [event] (when events (events event)) event)
         request {:root root :cwd cwd :argv (vec argv) :hidden hidden
-                 :environment environment :tools tools :limits limits}]
+                 :environment environment :image image :identity identity
+                 :contract contract :limits limits}]
     (emit {:event/type :worker/started
            :worker/runtime executable
            :worker/argv (vec argv)
            :worker/cwd cwd
            :worker/limits limits
            :worker/hidden-paths hidden
+           :worker/identity identity
            :project/input-coordinate (:snapshot/coordinate before)})
     (let [result (process/execute!
                   {:argv (into [executable] (machine-argv request))
@@ -319,6 +337,7 @@
                :project/entry-count (:snapshot/entry-count before)
                :project/bytes (:snapshot/bytes before)
                :project/hidden-paths hidden
+               :worker/identity identity
                :worker/limits limits}
         (= :completed status) (assoc :exit (:exit result))
         stable? (assoc :project/input-coordinate

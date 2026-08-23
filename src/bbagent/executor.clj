@@ -13,8 +13,8 @@
    relative directory and a deadline.  Everything else in the worker call
    below comes from this namespace."
   (:require [bb4t.execution :as execution]
+            [bbagent.coordinates :as coordinates]
             [bbagent.errors :as errors]
-            [bbagent.process :as process]
             [bbagent.snapshot :as snapshot]
             [bbagent.worker :as worker]
             [clojure.string :as str])
@@ -91,56 +91,63 @@
       {:version version
        :approval (if approved? :recognized :host-override)})))
 
-(defn- tool-bundle!
-  "The one directory of trusted tools a run may use, and its coordinate.
+(defn- guest-image!
+  "The guest image archive, and the digest of the bytes that will run.
 
-   Host-selected.  There is no model-facing argument that names a directory
-   to mount, because a guessed host path offered as a tool path would be a
-   read of the host wearing an execution capability's clothes."
-  [directory]
-  (when-not directory
-    (fail! "Project execution requires a trusted tool bundle" {}))
+   Host-selected, like everything else a run is bounded by.  There is no
+   model-facing argument that names an image, and there is no longer one
+   that names a tool directory either: the toolchain is inside this archive,
+   so the project is the only host path the machine ever sees.
+
+   An expected digest may be pinned, in which case a different image fails
+   here rather than running and being noticed afterwards."
+  [image expected-digest]
+  (when-not image
+    (fail! "Project execution requires a guest image archive" {}))
   (let [^Path path
         (try
-          (.toRealPath (Paths/get (str directory) (make-array String 0))
+          (.toRealPath (Paths/get (str image) (make-array String 0))
                        (make-array LinkOption 0))
           (catch Exception failure
-            (fail! "The trusted tool bundle directory is not readable"
+            (fail! "The guest image archive is not readable"
                    {:error/message (.getMessage failure)})))
-        _ (when-not (Files/isDirectory path (make-array LinkOption 0))
-            (fail! "The trusted tool bundle must be a directory" {}))
-        ;; Digested with the project snapshot, which refuses symbolic links
-        ;; that cannot be handed over faithfully.  That is the right rule
-        ;; here too: the bundle is mounted into the machine, and a link out
-        ;; of it would dangle there.
-        manifest (try
-                   (snapshot/manifest path {:exclusions #{}})
-                   (catch Exception failure
-                     (fail! (str "The trusted tool bundle cannot be handed to a "
-                                 "worker faithfully: " (ex-message failure))
-                            {:executor/tool-bundle (str path)})))
-        names (into []
-                    (comp (filter #(= :file (:kind %))) (map :path))
-                    (:snapshot/entries manifest))]
-    (when (empty? names)
-      (fail! "The trusted tool bundle is empty" {}))
+        _ (when-not (Files/isRegularFile path (make-array LinkOption 0))
+            (fail! "The guest image archive must be a regular file" {}))
+        digest (str "sha256:" (coordinates/sha-256-path path))]
+    (when (and expected-digest (not= expected-digest digest))
+      (fail! (str "The guest image archive does not match the digest this "
+                  "host pinned; execution refuses rather than running an "
+                  "image nobody approved")
+             {:image/expected expected-digest :image/actual digest}))
     {:path (str path)
-     :contents names
-     :coordinate (:snapshot/coordinate manifest)}))
+     :digest digest
+     :bytes (Files/size path)}))
 
-(defn- tool-version
-  "What the bundle's babashka calls itself, or nil.
+(def ^:private root-uid 0)
 
-   Reported rather than assumed: the digest says which bytes, and this says
-   what those bytes answer to, which is the part a reader of an evidence
-   file can recognise."
-  [^String directory]
-  (let [^Path binary (Paths/get directory (into-array String ["bb"]))]
-    (when (Files/isRegularFile binary (make-array LinkOption 0))
-      (let [result (process/execute!
-                    {:argv [(str binary) "--version"] :timeout-ms 15000})]
-        (when (and (= :exited (:status result)) (zero? (:exit result)))
-          (not-empty (str/trim (:stdout result))))))))
+(defn- project-identity!
+  "Who a run against this project executes as.
+
+   Derived from the project rather than chosen.  The workspace is an overlay
+   whose lower layer is the project itself, so its permissions are the
+   project's permissions: a workload whose uid does not match cannot write
+   to files it is supposed to own, and one that runs as root can undo the
+   parts of the workspace this design relies on.
+
+   A root-owned project has no non-root identity to derive, so it is refused
+   rather than quietly run privileged."
+  [project-root allow-privileged?]
+  (let [^Path path (.toRealPath (Paths/get (str project-root)
+                                           (make-array String 0))
+                                (make-array LinkOption 0))
+        uid (Files/getAttribute path "unix:uid" (make-array LinkOption 0))
+        gid (Files/getAttribute path "unix:gid" (make-array LinkOption 0))]
+    (when (and (= root-uid uid) (not allow-privileged?))
+      (fail! (str "This project is owned by root, so there is no unprivileged "
+                  "identity to run its commands as; execution refuses rather "
+                  "than running them with full privileges")
+             {:project/uid uid}))
+    {:uid uid :gid gid}))
 
 (defrecord SmolvmExecutionEnvironment [description invocations configuration]
   execution/ExecutionEnvironment
@@ -148,11 +155,16 @@
   (-execute [_ {:keys [argv cwd timeout-ms stdout-max-bytes stderr-max-bytes]
                 :as request}]
     (swap! invocations inc)
-    (let [{:keys [ceilings tools exclusions]} configuration]
+    (let [{:keys [ceilings image exclusions allow-privileged?]} configuration]
       (worker/execute!
        {:project-root (:project/root request)
         :argv argv
         :cwd cwd
+        :image (:path image)
+        ;; Derived per run from the project bb4t named, so the identity is
+        ;; always the one that matches the tree actually being executed
+        ;; against rather than one settled when the session started.
+        :identity (project-identity! (:project/root request) allow-privileged?)
         ;; The model asked for a deadline within its Context's limit; the
         ;; host still has the last word on it, and on everything else.
         :limits (assoc ceilings
@@ -162,8 +174,17 @@
                        (min stdout-max-bytes (:worker/stdout-max-bytes ceilings))
                        :worker/stderr-max-bytes
                        (min stderr-max-bytes (:worker/stderr-max-bytes ceilings)))
-        :tools [(:path tools)]
         :snapshot {:exclusions exclusions}}))))
+
+(defn project-identity
+  "The unprivileged identity a run against this project executes as.
+
+   Public because the evidence phases drive the worker directly and must use
+   the same derivation the executor does; deriving it twice by different
+   rules would prove something about the phases rather than the product."
+  ([project-root] (project-identity project-root false))
+  ([project-root allow-privileged?]
+   (project-identity! project-root allow-privileged?)))
 
 (defn invocation-count
   "How many times this environment has actually run something.
@@ -179,42 +200,61 @@
   "Builds the execution environment, or refuses to.
 
    Everything that could make one run mean something different from another
-   -- which manager, which tools, which ceilings, whether there is a network
+   -- which manager, which guest, which ceilings, whether there is a network
    -- is settled here and published as an inert description.  The Context
    that gets built on it carries that description's coordinate, so a session
    recorded against one execution environment cannot be silently resumed
-   against another."
+   against another.
+
+   A project root may be supplied as host policy so a session that could
+   never run anything fails when it is created rather than ten turns later."
   ([] (create nil))
-  ([{:keys [tools ceilings exclusions] :as options}]
+  ([{:keys [image image-digest ceilings exclusions project-root
+            allow-privileged?]
+     :as options}]
    (let [{:keys [version approval]} (approved-manager! options)
-         bundle (tool-bundle! tools)
+         image (guest-image! image image-digest)
          ceilings (merge default-ceilings ceilings)
          exclusions (or exclusions default-exclusions)
+         ;; Preflighted, not stored.  Each run derives the identity again
+         ;; from the project bb4t names, so this is an early refusal and
+         ;; never a second opinion about which project is being run against.
+         _ (when project-root
+             (project-identity! project-root allow-privileged?))
          description
          {:executor/type :bbagent/smolvm-worker
           :executor/manager worker/executable
           :executor/version version
           :executor/approval approval
-          :executor/guest {:privilege :root
+          :executor/guest {:image :bbagent/worker-image
+                           :image/digest (:digest image)
+                           :privilege (if allow-privileged?
+                                        :project-owner-or-root
+                                        :unprivileged)
+                           :identity :derived-from-project-owner
+                           :capabilities :none
+                           :prelude :in-image
+                           :prelude/contract worker/prelude-contract
                            :environment :constructed
                            :host-environment :not-inherited}
           :executor/network :none
           :executor/workspace {:model :overlayfs
                                :project-mount :read-only
+                               :host-paths-mounted 1
                                :lifecycle :ephemeral-machine-per-execution
                                :excluded-paths :hidden-from-workload}
           :executor/exclusions (vec (sort exclusions))
           :executor/tools {:bundle :babashka/static
-                           :version (tool-version (:path bundle))
-                           :contents (:contents bundle)
-                           :coordinate (:coordinate bundle)}
+                           :location :in-image
+                           :host-directory-mounted? false}
           :executor/ceilings (into (sorted-map) ceilings)}]
      (->SmolvmExecutionEnvironment
       description
       (atom 0)
       {:ceilings ceilings
-       :tools bundle
-       :exclusions exclusions}))))
+       :image image
+       :exclusions exclusions
+       :allow-privileged? (boolean allow-privileged?)}))))
 
 (defn describe
   "The environment's inert description and the coordinate bb4t computes."

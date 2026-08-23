@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+#
+# Builds the worker guest image and reports the digest of the exact archive
+# smolvm will be handed.
+#
+#   script/build-worker-image OUTPUT.tar
+#
+# The archive digest is what the executor pins, because it names the bytes
+# that ran rather than a tag that can move.
+
+set -euo pipefail
+
+OUTPUT=${1:?usage: script/build-worker-image OUTPUT.tar}
+SCRIPT_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+CONTEXT="$SCRIPT_ROOT/worker-image"
+
+BUILDER=${BBAGENT_IMAGE_BUILDER:-}
+if [ -z "$BUILDER" ]
+then
+  for candidate in podman docker buildah
+  do
+    if command -v "$candidate" >/dev/null 2>&1
+    then
+      BUILDER=$candidate
+      break
+    fi
+  done
+fi
+if [ -z "$BUILDER" ]
+then
+  echo "No OCI image builder found; install podman, docker, or buildah" >&2
+  exit 1
+fi
+if ! command -v bb >/dev/null 2>&1
+then
+  echo "The worker image bakes babashka; bb must be on PATH" >&2
+  exit 1
+fi
+
+STAGING=$(mktemp -d)
+trap 'rm -rf "$STAGING"' EXIT
+cp "$CONTEXT/Containerfile" "$CONTEXT/bbagent-prelude" "$STAGING/"
+install -m 0755 "$(command -v bb)" "$STAGING/bb"
+
+TAG="bbagent-worker:build-$$"
+"$BUILDER" build -q -t "$TAG" "$STAGING" >/dev/null
+rm -f "$OUTPUT"
+"$BUILDER" save --format docker-archive -o "$OUTPUT" "localhost/$TAG" >/dev/null 2>&1 \
+  || "$BUILDER" save --format docker-archive -o "$OUTPUT" "$TAG" >/dev/null
+"$BUILDER" rmi -f "localhost/$TAG" >/dev/null 2>&1 || true
+
+ARCHIVE_SHA=$(sha256sum "$OUTPUT" | cut -d' ' -f1)
+printf 'image/archive %s\nimage/archive-sha256 %s\nimage/bytes %s\n' \
+  "$OUTPUT" "$ARCHIVE_SHA" "$(stat -c %s "$OUTPUT")"
