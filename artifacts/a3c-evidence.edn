@@ -1,0 +1,155 @@
+{:milestone :a3c
+ :evidence :hardened-guest-boundary
+ :result :pass
+ :question "Can the A3b execution environment run project-owned code as an unprivileged, capability-free workload inside a pinned guest image, while preserving all A3a/A3b semantics and making the previously undoable guest-side hiding boundary actually non-undoable by the workload?"
+
+ :coordinate
+ {:bbagent/commit "740d117457aae6d84bbe3f9dc713bea1c894ea8c"
+  :bb4t/commit "227d38542d76565c2e3ac64d0c682141b1d597b9"
+  :builder "script/build-native"
+  :builder/commit "740d117457aae6d84bbe3f9dc713bea1c894ea8c"
+  :bbagent/tag "bbagent-a3c"
+  :bb4t/tag "bb4t-a3c"
+  :authoritative? true
+  :note "this artifact is the exact-evidence record; prose quoting a figure is quoting this file"}
+
+ :bb4t
+ {:changed? false
+  :diff "git diff 227d3854..HEAD -- src/ is empty"
+  :claim "A3c is entirely below the bb4t seam. bb4t still knows only that a Context may be granted an authorized execution environment, and still does not know a machine exists"
+  :tag//rationale "tagged at the unchanged coordinate so the milestone has a bb4t coordinate to name, following the A3a precedent; no commit was manufactured to obtain a new SHA"}
+
+ :predecessor
+ {:milestone :a3b
+  :status :recommended-pass-under-review
+  :tagged? false
+  :bbagent/runtime-commit "84201fc5e2f8c0e2be72e07b44bd9e0bd2c7aed9"
+  :bbagent/evidence-commit "861bea5"
+  :bb4t/commit "227d38542d76565c2e3ac64d0c682141b1d597b9"
+  :note "A3b was never frozen with a tag. Its records are left as measured and annotated as superseded where A3c closed a limitation; nothing in them was rewritten"}
+
+ :progression
+ {:a3b {:guest :smolvm-default :workload :root
+        :hiding "not a privilege boundary; a root workload could remount the export"
+        :toolchain :host-directory-bind-mounted}
+  :a3c {:guest :pinned-image :workload :unprivileged-project-owner
+        :hiding "enforced; the workload holds no capability with which to undo it"
+        :toolchain :in-image}}
+
+ :invariant
+ "A workload may do anything it likes to its disposable workspace, and can neither reach the authoritative checkout nor undo the boundary that was built for it."
+
+ :preserved-from-a3a-a3b
+ {:model-facing-arguments #{:argv :cwd :timeout-ms}
+  :host-policy #{:project :machine :image :resources :environment :network}
+  :frozen-profiles [:agent/project-read :agent/project-survey :agent/project-develop]
+  :only-executing-profile :agent/project-execute
+  :bb4t-knows-about-smolvm? false
+  :project-run-effect-kind :actuation
+  :replay-launches-worker? false
+  :moved-project-status :project-changed
+  :projected-class-count 0
+  :supplied-import-count 0
+  :raw-apis-reachable-from-sci? false}
+
+ :guest
+ {:image :built-and-pinned
+  :built-by "script/build-worker-image, from worker-image/Containerfile in this repository"
+  :built-from-commit "740d117457aae6d84bbe3f9dc713bea1c894ea8c"
+  :archive/sha256 "sha256:f5ac5ff2a6da74b259eb4e5ee9a1848729b32e83f4b9aadbed9349ec24c821e7"
+  :archive/bytes 148299264
+  :setuid-binaries 0
+  :setuid-assertion "the image build fails unless `find / -perm -4000 -o -perm -2000` is empty"
+  :prelude :in-image
+  :prelude/contract "1"
+  :host-assembles-shell-source? false
+  :toolchain {:bundle :babashka/static :version "babashka v1.13.219" :location :in-image}
+  :host-directories-mounted 1
+  :host-directories-mounted/what "the project, read-only, and nothing else"}
+
+ :identity
+ {:source :project-root-owner
+  :derived-per-run? true
+  :derived-from "the project bb4t names in the request, so it always matches the tree being executed against"
+  :root-owned-project :refused
+  :override :allow-privileged?
+  :rationale "the workspace is an overlay over the project, so its permissions are the project's permissions; a workload whose uid does not match cannot write files it is supposed to own"}
+
+ :gates/native
+ {:a3c {:guest/coordinate "sha256:9a3d1683ac6a96b0b92332c6f575b3bcc3d374424d0d2eb3518b1669fbf5ea53", :guest/description {:executor/guest {:capabilities :none, :identity :derived-from-project-owner, :image/digest "sha256:f5ac5ff2a6da74b259eb4e5ee9a1848729b32e83f4b9aadbed9349ec24c821e7", :prelude :in-image, :host-environment :not-inherited, :image :bbagent/worker-image, :environment :constructed, :prelude/contract "1", :privilege :unprivileged}, :executor/network :none, :executor/version "1.7.5", :executor/manager "smolvm", :executor/approval :recognized, :executor/ceilings {:worker/cpus 2, :worker/memory-mib 2048, :worker/stderr-max-bytes 1048576, :worker/stdout-max-bytes 1048576, :worker/timeout-ms 300000}, :executor/workspace {:model :overlayfs, :project-mount :read-only, :host-paths-mounted 1, :lifecycle :ephemeral-machine-per-execution, :excluded-paths :hidden-from-workload}, :executor/exclusions [".git"], :executor/tools {:bundle :babashka/static, :location :in-image, :host-directory-mounted? false}, :executor/type :bbagent/smolvm-worker}, :guest/identity {:uid 1000, :gid 1000}, :guest/available? true}
+  :a3c/privilege {:privilege/guest-directories-readonly :ok, :privilege/no-capabilities :ok, :privilege/gid "1000", :privilege/uid "1000", :privilege/workspace-still-writable :ok, :privilege/cannot-unmask-input :ok, :privilege/not-root :ok, :privilege/cannot-mount :ok, :privilege/runs-as-project-owner :ok, :privilege/no-setuid-binaries :ok}
+  :a3c/image {:image/project-is-mounted :ok, :image/prelude-contract "1", :image/digest "sha256:f5ac5ff2a6da74b259eb4e5ee9a1848729b32e83f4b9aadbed9349ec24c821e7", :image/digest-recorded :ok, :image/no-host-tool-directory-mounted :ok, :image/pinned-digest-accepted :ok, :image/wrong-digest-refused :ok, :image/toolchain-from-image :ok, :image/missing-archive-refused :ok}
+  :a3c/contract {:contract/version "1", :contract/mismatch-refused :ok, :contract/match-runs :ok, :contract/root-identity-refused :ok}
+  :a3c/dogfood {:dogfood/exit 0, :dogfood/duration-ms 2193, :dogfood/stdout "checked 27 source and 16 test files\na3a-source-check OK", :dogfood/check-passed :ok, :dogfood/unprivileged-toolchain-works :ok, :dogfood/vandal-believed-it-succeeded :ok, :dogfood/host-project-intact :ok}
+  :a3a/probe {:probe/exit-exact :ok, :probe/stdout-bounded :ok, :probe/coordinate-stable :ok, :probe/workload-believed-it-wrote :ok, :probe/network-unreachable :ok, :worker/runtime "smolvm", :probe/host-file-unreadable :ok, :probe/coordinate-sensitive :ok, :probe/duration-reported :ok, :probe/host-project-unchanged :ok, :probe/exit-zero :ok, :worker/version "smolvm 1.7.5", :probe/environment-constructed :ok, :probe/uncommitted-work-visible :ok, :probe/streams-separated :ok}
+  :a3a/timeout {:timeout/program-chose-124 :ok, :timeout/deadline-is-distinct :ok, :timeout/disposition-terminated :ok, :timeout/workload-was-running :ok, :timeout/in-machine-child-stopped :ok, :timeout/nothing-left-running :ok, :timeout/tick-count 27}
+  :a3a/dogfood {:dogfood/host-project-intact :ok, :dogfood/project-root "/tmp/bbagent-a3c-build/bbagent", :dogfood/duration-ms 2242, :dogfood/check-passed :ok, :dogfood/coordinate-recorded :ok, :dogfood/input-coordinate "sha256:3247a2e58ad5d3e9610261306f65e19ff2c03baaf509aa2a29a37009d0e3a820", :dogfood/vandal-believed-it-succeeded :ok, :dogfood/bytes 1050749, :dogfood/stdout "checked 27 source and 16 test files\na3a-source-check OK", :dogfood/entry-count 117, :dogfood/argv ["bb" "script/a3a-source-check.clj"], :dogfood/exit 0}
+  :a3b/version {:version/approved-set ["1.7.5"], :version/unapproved-refused :ok, :version/override-is-recorded :ok, :version/approved-is-recognized :ok, :version/guest-image-required :ok, :version/no-executor-no-context :ok}
+  :a3b/authority {:authority/projected-class-count 0, :authority/supplied-import-count 0, :authority/executor-coordinate "sha256:9a3d1683ac6a96b0b92332c6f575b3bcc3d374424d0d2eb3518b1669fbf5ea53", :authority/develop-plus-one :ok, :authority/grants [:data/json-read :data/json-write :project/edit :project/list :project/read :project/run :project/search :project/stat], :authority/refused-for-the-right-reason :ok, :authority/run-granted :ok, :authority/all-refused :ok, :authority/no-host-path-in-executor :ok, :authority/profile :agent/project-execute, :authority/negative-count 22}
+  :a3b/probe {:probe/exit-exact :ok, :probe/cwd-is-honoured :ok, :probe/input-coordinate-present :ok, :probe/workload-believed-it-wrote :ok, :probe/host-checkout-unchanged :ok, :probe/deadline-is-distinct :ok, :probe/network-unreachable :ok, :probe/program-chose-124 :ok, :probe/nothing-left-running :ok, :probe/host-file-unreadable :ok, :probe/excluded-paths-invisible :ok, :probe/executor-coordinate-recorded :ok, :probe/exit-zero :ok, :probe/streams-separated :ok}
+  :a3b/unstable {:unstable/status :project-changed, :unstable/not-ordinary-success :ok, :unstable/process-outcome-preserved :ok, :unstable/no-coordinate-claimed :ok, :unstable/a-later-run-is-anchored-again :ok}
+  :a3b/replay {:replay/legacy-refused :ok, :replay/executions-after-record 1, :replay/legacy-did-not-execute :ok, :replay/recorded-status :ok, :replay/executions-after-replay 1, :replay/replay-succeeded :ok, :replay/exit-restored :ok, :replay/no-second-execution :ok, :replay/one-execution :ok, :replay/result-restored :ok, :replay/executions-after-legacy 1}
+  :a3b/dogfood {:dogfood/entry-count 117, :dogfood/exit 0, :dogfood/duration-ms 1954, :dogfood/stdout "checked 27 source and 16 test files\na3a-source-check OK", :dogfood/check-passed :ok, :dogfood/composed-through-sci :ok, :dogfood/vandal-believed-it-succeeded :ok, :dogfood/host-project-intact :ok}
+  :failed-gates 0
+  :counts {:a3c 29 :a3a 23 :a3b 43}
+  :claim "A3a's and A3b's gates were re-run unchanged against the new substrate; that they pass is the evidence that A3c changed the guest and not the semantics"}
+
+ :gate-patterns
+ {:positive 94
+  :positive/verified 94
+  :negative-leak-checks 4
+  :negative-leak-checks/absent 4
+  :method "extracted mechanically from script/build-native and matched against freshly generated phase output before the build was spent"}
+
+ :suites
+ {:bbagent {:tests 219 :assertions 1425 :failures 0 :errors 0}
+  :bb4t {:tests 25 :assertions 199 :failures 0 :errors 0}
+  :pty {:gates 37 :passed 37}
+  :authority-negatives {:count 61 :previous 58}}
+
+ :image
+ {:sha256 "eb4d9ce06387ba5a85e04c25fa28a4a6b93a136bee5c6509daeca8ab438491b9"
+  :bytes 76876032
+  :graalvm "Oracle GraalVM 25.2.4+7.1 (build 25.0.4+7-LTS-jvmci-25.2-b20)"
+  :machine-manager "smolvm 1.7.5"}
+
+ :dogfood/live
+ {:profile :agent/project-execute
+  :model "Qwen3.6-27B (local, OpenAI-compatible endpoint)"
+  :path "bounded SCI -> project/run -> pinned image -> unprivileged workload -> real project check"
+  :arms {:verify {:status :finished :repl/attempts 12 :run/executed 2
+                  :run/refused-before-executor 0
+                  :every-executed-run-anchored? true
+                  :saw-a-passing-check? true :project/fixed? true}
+         :resume {:status :finished :repl/attempts 12
+                  :executor/invocations-after-turn 2
+                  :executor/invocations-after-resume 2
+                  :no-second-execution? true
+                  :replay {:forms 12 :reconstructed 12 :legacy 0 :reobserved [] :exact? true}}
+         :unstable {:status :finished :repl/attempts 10
+                    :statuses [:project-changed :project-changed]
+                    :unanchored-runs-carry-no-coordinate? true}}
+  :mutation {:target "a throwaway clone, never this checkout"
+             :workload-did "rm -rf src/bbagent; overwrote README.md; created a new file"
+             :workload-believed-it-succeeded? true
+             :checkout-intact? true
+             :unprivileged-check-exit 0}
+  :raw "artifacts/a3c-dogfood-runs.edn"}
+
+ :defects-found-during-closure
+ ["su-exec exits 1 when it cannot exec, erasing the 127 that distinguishes a missing command from one that ran and failed; the drop now goes through a shell"
+  "su-exec resets HOME from a passwd file the derived uid does not appear in, leaving HOME on a filesystem the workload cannot write; HOME is set after the drop"
+  "busybox setpriv cannot change uid, and installing util-linux to get one introduces a setuid mount that setuid-stripping then deletes; su-exec avoids both"
+  "a renamed gate key (:version/tool-bundle-required -> :version/guest-image-required) was not updated in script/build-native and stopped a build"
+  "the A3a phases printed namespace-abbreviated maps on the JVM and full keys in the image, so their gate patterns could not be verified outside a build; all phases now share one emitter"
+  "the live dogfood harness hardcoded its output path and overwrote A3b's dogfood record with A3c-era results; the path is now an argument and A3b's record was restored"]
+
+ :nonclaims
+ ["the machine is still the hard host-isolation boundary; A3c is defence in depth behind it and does not replace the hypervisor"
+  "this is proof against umount, not against a kernel bug"
+  "the guest image is trusted, not verified; its digest says which bytes ran, not that they are benign"
+  "the overlay's lower layer is still live; a moved project is still reported as :project-changed rather than prevented"
+  "a root-owned project is refused, not handled"
+  "A3b's records describe a root workload and are accurate for A3b; they were annotated, not rewritten"]
+
+ :recommendation :pass}

@@ -104,10 +104,10 @@ session which could never run anything fails when it is made.
 
 A root-owned project has no unprivileged identity to derive. It is refused.
 
-## 4. What the gates caught that reasoning did not
+## 4. Defects discovered during closure
 
-Three defects, all found by tests rather than by thinking, all in the ten lines
-around the privilege drop.
+Five, all found by tests or by a build rather than by thinking. Three are in
+the ten lines around the privilege drop; two are about how evidence is checked.
 
 **`su-exec` erases "command not found".** It exits 1 when it cannot exec, which
 is indistinguishable from a program that ran and chose 1. A3a's whole exit-code
@@ -131,6 +131,24 @@ hardening step deleted `mount` and broke the prelude. `su-exec` avoids both and
 drops capabilities implicitly on the uid change. The image build now asserts
 there is no setuid or setgid binary, so this cannot regress silently.
 
+**A renamed gate key stopped a build.** `:version/tool-bundle-required` became
+`:version/guest-image-required` when the tool bundle became an image, and
+`script/build-native` was still grepping the old name. The build stopped on a
+gate that was wrong rather than on behaviour that was — the second time this
+class of defect has cost a build.
+
+**Half the gate patterns could not be checked outside a build.** The A3b and
+A3c phases already printed identically on the JVM and in the image, because A3b
+fixed that. The A3a phases still used plain `prn`, whose namespace-map
+abbreviation depends on `*print-namespace-maps*` — bound by `clojure.main`,
+unbound in a native image — so their patterns matched the image and could not
+be verified anywhere else. All evidence phases now go through one emitter, and
+closure verified every one of the **94** positive gate patterns in
+`build-native` by extracting them mechanically from the script and matching
+them against freshly generated output, plus the four negative leak checks by
+their absence. Checking only the patterns just written is what let the stale
+one through.
+
 ## 5. Evidence
 
 Every A3a and A3b gate was re-run **unchanged** against the new substrate. That
@@ -143,12 +161,39 @@ is the main evidence that A3c changed the guest and not the semantics.
 | A3b gates, re-run | 5 compatibility + 8 authority + 14 isolation + 5 unstable-input + 7 replay + 4 dogfood |
 | authority negatives | 61 on the default profile (was 58) |
 | deterministic suites | bbagent 219 tests / 1425 assertions, bb4t 25 / 199, 0 failures |
+| gate patterns | 94/94 positive patterns in `build-native` matched against real output, 4/4 negative leak checks absent |
+| live dogfood | 3/3 arms finished; verification works unprivileged, and a destructive workload leaves the checkout intact |
 
 The privilege gates in particular: not root, runs as the project's owner,
 `CapEff` and `CapPrm` both zero, cannot unmask `/input`, cannot mount anything,
 no setuid binaries present, guest directories not writable, and the workspace
 still fully writable — that last one matters, because a privilege drop that
 broke the workspace would have traded one property for another.
+
+## 5a. The live dogfood, through the public semantic path
+
+A local Qwen3.6-27B under `:agent/project-execute`, against the hardened guest,
+one throwaway fixture per arm. The path exercised is the whole one: bounded SCI
+→ `project/run` → pinned image → unprivileged workload → a real project check.
+
+| arm | result |
+|---|---|
+| verify | finished in 12 actions; 2 executions, 0 refused, **both anchored**; saw its check pass; the fixture ended fixed |
+| resume | finished; session thrown away and rebuilt — 12 forms reconstructed, 0 re-observed, executor invocations 2 before and 2 after, **no second execution** |
+| unstable | finished; the host rewrote the project throughout the turn and **both** runs came back `:project-changed` with no exit and no coordinate |
+
+The mutation half was proven separately, against a throwaway clone of this
+repository rather than the checkout itself. A workload that ran `rm -rf
+src/bbagent`, overwrote `README.md` and created a new file believed all three
+succeeded — `:dogfood/vandal-believed-it-succeeded :ok` — and the clone came
+back with `src/bbagent/worker.clj` present, no new file, and a `README.md` that
+still begins `# bbagent`. The same phase ran the project's real babashka check
+to completion **as the unprivileged workload**, exit 0, from the toolchain
+inside the image.
+
+That is the A3c claim end to end: an unprivileged workload can do real project
+verification, and can do anything it likes to its workspace without any of it
+reaching the authoritative checkout.
 
 ## 6. Nonclaims
 
@@ -173,3 +218,55 @@ its result, which appended to this repository's own README twice, one of which
 reached `830ec07`. Both lines are removed and the hazard is recorded in
 `AGENTS.md`, because the problem is not the line — it is that several evidence
 functions actuate and their names do not say so at the call site.
+
+## 8. Exact coordinates
+
+| | |
+|---|---|
+| bbagent runtime, gates, suites, dogfood | `740d117457aae6d84bbe3f9dc713bea1c894ea8c` |
+| bb4t | `227d38542d76565c2e3ac64d0c682141b1d597b9` — **unchanged since A3b** |
+| native image | `sha256:eb4d9ce0…`, 76 876 032 bytes |
+| guest image archive | `sha256:f5ac5ff2…`, 148 299 264 bytes, built from the same commit |
+| GraalVM | Oracle GraalVM 25.2.4+7.1 (25.0.4+7-LTS-jvmci-25.2-b20) |
+| machine manager | smolvm 1.7.5 |
+| toolchain in guest | babashka v1.13.219 |
+
+`artifacts/a3c-evidence.edn` is the authoritative record; any figure quoted in
+prose is quoting that file.
+
+**bb4t has no A3c implementation change.** `git diff 227d3854..HEAD -- src/` is
+empty. A3c is entirely below the bb4t seam: bb4t still knows only that a Context
+may be granted an authorized execution environment, and still does not know a
+machine exists. A `bb4t-a3c` tag is placed at that unchanged coordinate so the
+milestone has a bb4t coordinate to name, following the A3a precedent; no commit
+was manufactured to obtain a new SHA.
+
+**A3b is not tagged.** It was recommended PASS and stopped for review, and
+tagging was never requested. Freezing A3c therefore leaves a gap in the tag
+sequence — `bbagent-a3a` then `bbagent-a3c`. That is repository reality rather
+than an oversight in this milestone, and it is recorded here so a reviewer is
+not left inferring that A3b was skipped.
+
+## 9. Recommendation
+
+**PASS.** Every item on the closure checklist has evidence:
+
+- source and evidence agree; A3b's records are annotated, not rewritten
+- workload is non-root by default, uid/gid derived from the project owner
+- `CapEff` and `CapPrm` both zero
+- a root-owned project fails closed by default
+- the workload cannot unmask `/input` and cannot mount anything
+- the workspace remains writable and supports ordinary project mutation
+- the guest image digest participates in the executor's identity
+- a wrong pinned digest and a missing archive are both refused
+- a prelude contract mismatch refuses before argv runs
+- the toolchain comes from the image; no host tool directory is mounted
+- A3a's and A3b's gates pass unchanged
+- `project/run` replay still causes no second execution
+- the authority corpus passes at 61 probes
+- deterministic suites and the native product proof pass, 37/37 PTY gates
+- the live dogfood succeeds on all three arms, and a destructive workload
+  leaves the checkout intact
+
+A3c strengthens the **guest** boundary. It does not replace SmolVM as the hard
+host-isolation boundary, and nothing here should be read as claiming it does.

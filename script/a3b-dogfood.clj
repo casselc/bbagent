@@ -17,7 +17,12 @@
               proving the model is told its result is not anchored
 
   Usage:
-    clojure -M script/a3b-dogfood.clj STATE_ROOT ENDPOINT MODEL TOOLS_DIR"
+    clojure -M script/a3b-dogfood.clj STATE_ROOT ENDPOINT MODEL IMAGE_ARCHIVE [OUT]
+
+  OUT defaults to artifacts/a3b-dogfood-runs.edn. Pass it when re-running this
+  harness for a later milestone: writing over the previous milestone's record
+  would replace evidence about a substrate that no longer exists with evidence
+  about the current one, under the previous milestone's name."
   (:require [bbagent.agent :as agent]
             [bbagent.executor :as executor]
             [bbagent.provider :as provider]
@@ -142,7 +147,7 @@
 
 (defn- verify-arm! [settings]
   (let [project-root (fixture! "verify")
-        environment (executor/create {:tools (:tools settings)})
+        environment (executor/create {:image (:image settings) :project-root project-root})
         session-id "a3b-verify"
         outcome (run-turn! (assoc settings :session-id session-id
                                   :project-root project-root
@@ -179,7 +184,7 @@
 
 (defn- resume-arm! [settings]
   (let [project-root (fixture! "resume")
-        environment (executor/create {:tools (:tools settings)})
+        environment (executor/create {:image (:image settings) :project-root project-root})
         session-id "a3b-resume"
         outcome (run-turn! (assoc settings :session-id session-id
                                   :project-root project-root
@@ -211,7 +216,7 @@
 
 (defn- unstable-arm! [settings]
   (let [project-root (fixture! "unstable")
-        environment (executor/create {:tools (:tools settings)})
+        environment (executor/create {:image (:image settings) :project-root project-root})
         session-id "a3b-unstable"
         ;; Moves the project continuously for the whole turn rather than at
         ;; a guessed moment, because a single timed write only lands inside a
@@ -244,12 +249,12 @@
             (every? #(nil? (:project/input-coordinate %))
                     (filter #(= :project-changed (:status %)) runs))})))
 
-(defn -main [& [state-root endpoint model tools]]
-  (when-not (and state-root endpoint model tools)
-    (println "usage: STATE_ROOT ENDPOINT MODEL TOOLS_DIR")
+(defn -main [& [state-root endpoint model image out]]
+  (when-not (and state-root endpoint model image)
+    (println "usage: STATE_ROOT ENDPOINT MODEL IMAGE_ARCHIVE [OUT]")
     (System/exit 2))
   (let [settings {:state-root state-root :endpoint endpoint
-                  :model model :tools tools}
+                  :model model :image image}
         observations
         (mapv (fn [arm!]
                 (let [o (arm! settings)]
@@ -264,8 +269,8 @@
     (doseq [o observations]
       (println (format "%s: %s" (name (:arm o))
                        (pr-str (dissoc o :repl/sources :run/results :message)))))
-    (spit "artifacts/a3b-dogfood-runs.edn"
-          (with-out-str (pprint/pprint (vec observations))))
-    (println "\nwritten to artifacts/a3b-dogfood-runs.edn")))
+    (let [out (or out "artifacts/a3b-dogfood-runs.edn")]
+      (spit out (with-out-str (pprint/pprint (vec observations))))
+      (println "\nwritten to" out))))
 
 (apply -main *command-line-args*)
