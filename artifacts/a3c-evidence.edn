@@ -8,6 +8,7 @@
   :bb4t/commit "227d38542d76565c2e3ac64d0c682141b1d597b9"
   :builder "script/build-native"
   :builder/commit "740d117457aae6d84bbe3f9dc713bea1c894ea8c"
+  :runtime-vs-evidence "the image, the guest image, all native gates, both suites, the PTY gates and the live dogfood were produced at :bbagent/commit above. The commit carrying this artifact is later and adds only docs/, artifacts/ and an output-path argument to the dogfood harness; `git diff --name-only 740d117..HEAD -- src test worker-image script/build-native script/build-worker-image` is empty."
   :bbagent/tag "bbagent-a3c"
   :bb4t/tag "bb4t-a3c"
   :authoritative? true
