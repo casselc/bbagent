@@ -10,6 +10,24 @@ Standing rules:
 - record explicit coordinates and honest unknown/development values;
 - prefer the smallest implementation that answers the active milestone question.
 
+`bbagent.sqlite/authority-smoke!` and the A3a/A3b/A3c dogfood phases **change
+the project they are given**: the first appends to its `README.md` to prove
+the anchored-write path, and the others run a workload that tries to destroy
+it. Give them a throwaway fixture. Pointing one at this checkout to read a
+number out of its result appends to this repository's own README, which is
+how a stray `edited` line reached `830ec07`.
+
+For A3c (see `docs/CURRENT_SCOPE.md`):
+
+- the guest is a built image, not whatever the machine manager pulled; its
+  digest is part of the execution environment's coordinate, so changing it
+  changes the identity of every Context built on it;
+- the prelude lives in the image and the host assembles no shell source;
+  they agree on an argument contract that is checked before anything mounts;
+- the workload runs as an identity derived from the project and holds no
+  capabilities — hiding excluded paths is now enforced rather than observed;
+- a root-owned project has no unprivileged identity and is refused.
+
 For A3b (see `docs/CURRENT_SCOPE.md`):
 
 - `project/run` takes argv, a relative cwd and a deadline, and nothing else;

@@ -64,4 +64,3 @@ See `docs/CURRENT_SCOPE.md` for current milestone boundaries,
 `docs/A3B_FINDINGS.md` for what execution does and does not claim,
 `docs/A3A_FINDINGS.md` for the substrate underneath it, and
 `docs/architecture/0001-trusted-application-inclusion.md` for native inclusion.
-edited
