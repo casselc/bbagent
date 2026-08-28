@@ -8,6 +8,7 @@
              [bbagent.provider-test]
              [bbagent.replay-test]
              [bbagent.snapshot-test]
+             [bbagent.spi-test]
              [bbagent.sqlite-store-test]
              [bbagent.sqlite-test]
              [bbagent.store-contract-test]
@@ -27,6 +28,7 @@
                         'bbagent.provider-test
                         'bbagent.replay-test
                         'bbagent.snapshot-test
+                        'bbagent.spi-test
                         'bbagent.sqlite-store-test
                         'bbagent.sqlite-test
                         'bbagent.store-contract-test
